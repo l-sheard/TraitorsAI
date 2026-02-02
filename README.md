@@ -28,6 +28,26 @@ python -m traitors_ai.runner run-one --seed 1 --condition baseline_memory
 python -m traitors_ai.runner run-batch --seeds 1..25 --condition baseline_memory --outdir results
 ```
 
+## Visualize game replays
+
+You can view games interactively in a web browser with the React frontend and FastAPI backend.
+
+### Start the backend
+```
+cd backend
+pip install -r requirements.txt
+python -m uvicorn app:app --reload --port 8000
+```
+
+### Start the frontend
+```
+cd frontend
+npm install
+npm start
+```
+
+The viewer will open at `http://localhost:3000`. You can browse saved games, scrub through events, adjust playback speed (0.5x to 4x), and see all agents around a circular table with speaking indicators, role colors, and eliminations revealed.
+
 ## Logs & Outputs
 - JSONL action logs are stored in `results/logs/{game_id}.jsonl`.
 - Game summaries are stored in `results/logs/{game_id}_summary.json`.
