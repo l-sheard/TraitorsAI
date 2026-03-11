@@ -1,10 +1,10 @@
 # Traitors AI
 
-Traitors AI is a reproducible, LLM-driven social deduction simulator inspired by **The Traitors**. The project combines a deterministic game engine, configurable agent orchestration, JSONL replay logging, and a lightweight replay viewer for exploring how autonomous agents reason, speak, vote, and adapt over time.
+Traitors AI is a reproducible, LLM-driven social deduction simulator inspired by **The Traitors**. The project combines a deterministic game engine, configurable agent orchestration, JSONL replay logging, and a replay viewer for inspecting how autonomous agents reason, speak, vote, and adapt over time.
 
-## Why this repo is useful as a portfolio sample
+## Features
 
-This codebase is intentionally structured to demonstrate:
+This codebase includes:
 - clear Python domain modelling with `pydantic`
 - deterministic simulation logic separated from model-driven behaviour
 - resilient handling of structured LLM output
@@ -31,7 +31,7 @@ This codebase is intentionally structured to demonstrate:
 - `frontend/src/lib/replayState.js` — state reconstruction from replay events
 - `frontend/src/components/*` — viewer UI for replay navigation and table visualisation
 
-## Core design choices
+## Design
 
 ### Deterministic engine, stochastic agents
 The game engine remains deterministic for a fixed seed. LLMs only influence agent-facing actions such as:
@@ -46,7 +46,7 @@ This keeps experiments reproducible while still allowing agent behaviour to vary
 ### Structured output normalisation
 LLM responses are validated against typed schemas. The project now also normalises common model mistakes, such as returning `"P3"` instead of `3`, which makes replay generation more reliable without weakening validation.
 
-### Replay-first observability
+### Logging and reproducibility
 Each game produces:
 - a JSONL event stream for step-by-step analysis
 - a structured summary JSON for metadata and outcomes
