@@ -31,10 +31,9 @@ function App() {
     <div className="min-h-screen bg-slate-950 text-white">
       <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur">
         <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          <p className="mb-2 text-sm uppercase tracking-[0.3em] text-sky-300">Portfolio demo</p>
           <h1 className="text-4xl font-bold">Traitors AI Replay Console</h1>
           <p className="mt-3 max-w-3xl text-slate-300">
-            A compact full-stack interface for browsing deterministic social-deduction simulations,
+            Browse deterministic social-deduction simulations,
             inspecting event streams, and replaying agent decisions round by round.
           </p>
         </div>
