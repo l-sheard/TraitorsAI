@@ -1,6 +1,6 @@
 import random
 
-from traitors_ai.game_engine import apply_murder, assign_roles, check_terminal
+from traitors_ai.game_engine import apply_murder, apply_vote, assign_roles, check_terminal
 
 
 def test_assign_roles_counts():
@@ -26,3 +26,13 @@ def test_terminal_conditions():
     assert check_terminal({1, 2}, set()) == "faithful"
     assert check_terminal({1, 2}, {1}) == "traitors"
     assert check_terminal({1, 2, 3}, {1}) is None
+
+
+def test_vote_tie_reports_no_elimination_before_revote():
+    rng = random.Random(7)
+
+    eliminated, metadata = apply_vote({1, 2, 3, 4}, {1: 3, 2: 4, 3: 4, 4: 3}, rng)
+
+    assert eliminated is None
+    assert metadata["tied"] == [3, 4]
+    assert metadata["random"] is False

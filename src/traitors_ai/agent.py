@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Type
 
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.messages import AIMessage
+from pydantic import BaseModel
 
+from .parsing import StructuredResponseNormalizer
 from . import prompts
 from .schemas import AgentPrivateState, BeliefUpdate, MurderAction, VoteAction
 
@@ -30,14 +32,23 @@ class TraitorsAgent:
             return response.content
         return str(response)
 
-    def _structured_invoke(self, prompt: str, parser, retries: int = 2) -> Tuple[Optional[object], Optional[str]]:
+    def _structured_invoke(
+        self,
+        prompt: str,
+        parser: PydanticOutputParser,
+        model_class: Type[BaseModel],
+        retries: int = 2,
+    ) -> Tuple[Optional[BaseModel], Optional[str]]:
         last_error: Optional[str] = None
         for attempt in range(retries + 1):
             raw = self._invoke(prompt)
             try:
                 return parser.parse(raw), None
             except Exception as exc:  # noqa: BLE001
-                last_error = f"parse_error: {exc}"
+                try:
+                    return StructuredResponseNormalizer.normalize(model_class, raw), None
+                except Exception as normalization_exc:  # noqa: BLE001
+                    last_error = f"parse_error: {exc}; normalization_error: {normalization_exc}"
                 prompt = (
                     "You must output valid JSON ONLY.\n"
                     + prompt
@@ -67,7 +78,7 @@ class TraitorsAgent:
             top_suspicions=view["top_suspicions"],
             format_instructions=parser.get_format_instructions(),
         )
-        result, error = self._structured_invoke(prompt, parser)
+        result, error = self._structured_invoke(prompt, parser, BeliefUpdate)
         if result is None:
             scores = {pid: 0.5 for pid in view["alive_ids"] if pid != self.id}
             return BeliefUpdate(scores=scores, notes="fallback neutral"), error
@@ -104,7 +115,7 @@ class TraitorsAgent:
             format_instructions=parser.get_format_instructions(),
             allowed_targets=allowed_text,
         )
-        result, error = self._structured_invoke(prompt, parser)
+        result, error = self._structured_invoke(prompt, parser, VoteAction)
         if result is None:
             rng = view["rng"]
             candidates = [pid for pid in view["alive_ids"] if pid != self.id]
@@ -145,7 +156,7 @@ class TraitorsAgent:
             traitor_summary=view.get("traitor_summary", ""),
             format_instructions=parser.get_format_instructions(),
         )
-        result, error = self._structured_invoke(prompt, parser)
+        result, error = self._structured_invoke(prompt, parser, MurderAction)
         if result is None:
             rng = view["rng"]
             candidates = [pid for pid in view["alive_ids"] if pid not in view["traitor_ids"]]

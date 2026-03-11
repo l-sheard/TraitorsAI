@@ -47,6 +47,7 @@ def belief_update_prompt(
 ) -> str:
     return (
         "Update your private suspicion scores for ALL OTHER alive players.\n"
+        "Use raw integer player IDs as JSON keys, for example: {\"1\": 0.65, \"4\": 0.15}.\n"
         "Return scores in [0,1] and a short internal note.\n"
         "Output MUST be valid JSON only.\n\n"
         f"Persona card:\n{persona_card}\n\n"
@@ -88,6 +89,7 @@ def vote_prompt(
 ) -> str:
     return (
         "Select a banish vote target (alive player other than yourself).\n"
+        "Return `target_id` as an integer only, not a label like P3.\n"
         + (f"Allowed targets: {allowed_targets}\n" if allowed_targets else "")
         + "Output MUST be valid JSON only.\n\n"
         f"Persona card:\n{persona_card}\n\n"
@@ -133,6 +135,7 @@ def murder_prompt(
 ) -> str:
     return (
         "Choose a faithful player to murder (alive, non-traitor).\n"
+        "Return `target_id` as an integer only, not a label like P3.\n"
         "Output MUST be valid JSON only.\n\n"
         f"Persona card:\n{persona_card}\n\n"
         + _base_context(role, round_idx, alive_players, public_summary, memory_summary, top_suspicions)

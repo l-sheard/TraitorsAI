@@ -12,6 +12,8 @@ function PlaybackControls({
   onSeek,
   onSpeedChange
 }) {
+  const safeMax = Math.max(totalEvents - 1, 0);
+
   const speedOptions = [
     { label: '0.5x', value: 2000 },
     { label: '1x', value: 1000 },
@@ -20,50 +22,46 @@ function PlaybackControls({
   ];
 
   return (
-    <div className="bg-gray-800 rounded-lg p-4">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
       <div className="flex items-center space-x-4">
-        {/* Previous */}
         <button
           onClick={onPrev}
           disabled={currentIndex === 0}
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-900 disabled:text-gray-600 text-white rounded transition-colors"
+          className="rounded bg-slate-800 px-4 py-2 text-white transition-colors hover:bg-slate-700 disabled:bg-slate-950 disabled:text-slate-600"
         >
           ⏮️ Prev
         </button>
 
-        {/* Play/Pause */}
         <button
           onClick={isPlaying ? onPause : onPlay}
-          className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-semibold transition-colors"
+          disabled={totalEvents < 2}
+          className="rounded bg-sky-600 px-6 py-2 font-semibold text-white transition-colors hover:bg-sky-500 disabled:bg-slate-800 disabled:text-slate-500"
         >
           {isPlaying ? '⏸️ Pause' : '▶️ Play'}
         </button>
 
-        {/* Next */}
         <button
           onClick={onNext}
           disabled={currentIndex >= totalEvents - 1}
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:bg-gray-900 disabled:text-gray-600 text-white rounded transition-colors"
+          className="rounded bg-slate-800 px-4 py-2 text-white transition-colors hover:bg-slate-700 disabled:bg-slate-950 disabled:text-slate-600"
         >
           Next ⏭️
         </button>
 
-        {/* Progress bar */}
         <div className="flex-1">
           <input
             type="range"
             min="0"
-            max={totalEvents - 1}
-            value={currentIndex}
+            max={safeMax}
+            value={Math.min(currentIndex, safeMax)}
             onChange={(e) => onSeek(parseInt(e.target.value))}
-            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+            className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-slate-700 accent-sky-600"
           />
-          <div className="text-center text-sm text-gray-400 mt-1">
-            Event {currentIndex + 1} / {totalEvents}
+          <div className="mt-1 text-center text-sm text-slate-400">
+            Event {totalEvents === 0 ? 0 : currentIndex + 1} / {totalEvents}
           </div>
         </div>
 
-        {/* Speed controls */}
         <div className="flex space-x-1">
           {speedOptions.map(option => (
             <button
@@ -71,9 +69,9 @@ function PlaybackControls({
               onClick={() => onSpeedChange(option.value)}
               className={`
                 px-3 py-2 rounded text-sm transition-colors
-                ${playbackSpeed === option.value 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                ${playbackSpeed === option.value
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }
               `}
             >

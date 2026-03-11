@@ -20,6 +20,22 @@ class GameConfig(BaseModel):
     condition_name: str = "baseline_memory"
     tie_break_rule: str = "revote_once_then_random"
 
+    @model_validator(mode="after")
+    def validate_player_counts(self) -> "GameConfig":
+        if self.n_players < 3:
+            raise ValueError("At least 3 players are required")
+        if self.n_traitors < 1:
+            raise ValueError("At least 1 traitor is required")
+        if self.n_traitors >= self.n_players:
+            raise ValueError("Number of traitors must be smaller than number of players")
+        if self.discussion_turns < 1:
+            raise ValueError("Discussion turns must be at least 1")
+        if self.max_rounds < 1:
+            raise ValueError("Max rounds must be at least 1")
+        if self.message_char_limit < 50:
+            raise ValueError("Message character limit must be at least 50")
+        return self
+
 
 class Role(str, Enum):
     faithful = "faithful"
@@ -105,6 +121,18 @@ class GameState(BaseModel):
     winner: Optional[str] = None
 
 
+class GameSummary(BaseModel):
+    game_id: str
+    seed: int
+    condition: str
+    winner: Optional[str]
+    rounds: int
+    eliminated_order: List[int] = Field(default_factory=list)
+    config: GameConfig
+    roles: Dict[int, Role] = Field(default_factory=dict)
+    personas: Dict[int, Dict[str, Any]] = Field(default_factory=dict)
+
+
 def validate_vote_action(vote: VoteAction, voter_id: int, alive: Set[int]) -> None:
     if voter_id == vote.target_id:
         raise ValueError("Voter cannot vote for self")
@@ -122,5 +150,6 @@ __all__ = [
     "AgentPrivateState",
     "BeliefUpdate",
     "GameState",
+    "GameSummary",
     "validate_vote_action",
 ]

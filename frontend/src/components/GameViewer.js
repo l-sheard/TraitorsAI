@@ -1,18 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useEffect, useMemo, useState } from 'react';
+
+import { fetchReplay } from '../api/replayApi';
+import { buildReplaySnapshot, getWinnerPresentation } from '../lib/replayState';
 import RoundTable from './RoundTable';
 import EventLog from './EventLog';
 import PlaybackControls from './PlaybackControls';
-
-const API_BASE = 'http://localhost:8000';
 
 function GameViewer({ gameId, onBack }) {
   const [summary, setSummary] = useState(null);
   const [events, setEvents] = useState([]);
   const [currentEventIndex, setCurrentEventIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1000); // ms between events
+  const [playbackSpeed, setPlaybackSpeed] = useState(1000);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     loadGameData();
@@ -36,28 +37,25 @@ function GameViewer({ gameId, onBack }) {
 
   const loadGameData = async () => {
     try {
-      const [summaryRes, eventsRes] = await Promise.all([
-        axios.get(`${API_BASE}/games/${gameId}/summary`),
-        axios.get(`${API_BASE}/games/${gameId}/events`)
-      ]);
-      setSummary(summaryRes.data);
-      setEvents(eventsRes.data);
-      setLoading(false);
+      setLoading(true);
+      setError('');
+      setCurrentEventIndex(0);
+      setIsPlaying(false);
+      const replay = await fetchReplay(gameId);
+      setSummary(replay.summary);
+      setEvents(replay.events);
     } catch (error) {
       console.error('Error loading game data:', error);
+      setError('Unable to load this replay.');
+    } finally {
       setLoading(false);
     }
   };
 
-  const getCurrentState = () => {
-    // Build game state up to current event
-    const eventsUpToCurrent = events.slice(0, currentEventIndex + 1);
-    return {
-      events: eventsUpToCurrent,
-      currentEvent: events[currentEventIndex],
-      summary
-    };
-  };
+  const replaySnapshot = useMemo(
+    () => buildReplaySnapshot(summary, events, currentEventIndex),
+    [summary, events, currentEventIndex]
+  );
 
   if (loading) {
     return (
@@ -67,53 +65,76 @@ function GameViewer({ gameId, onBack }) {
     );
   }
 
+  if (error) {
+    return (
+      <div className="rounded-2xl border border-rose-900/60 bg-rose-950/40 p-8 text-center">
+        <p className="text-lg text-rose-200">{error}</p>
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-4 rounded-lg bg-slate-800 px-4 py-2 font-semibold text-white transition hover:bg-slate-700"
+        >
+          Back to games
+        </button>
+      </div>
+    );
+  }
+
+  const winnerPresentation = getWinnerPresentation(summary?.winner);
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-gray-800 rounded-lg p-4 flex justify-between items-center">
-        <button
-          onClick={onBack}
-          className="text-gray-400 hover:text-white transition-colors"
-        >
-          ← Back to Games
-        </button>
-        <div className="text-white text-center">
-          <h2 className="text-xl font-bold">{gameId}</h2>
-          <p className="text-sm text-gray-400">
-            Round {events[currentEventIndex]?.round || 0} - {events[currentEventIndex]?.phase || 'start'}
-          </p>
-        </div>
-        <div className={`text-lg font-bold ${
-          summary?.winner === 'traitor' ? 'text-red-500' : 'text-blue-500'
-        }`}>
-          {summary?.winner === 'traitor' ? '🗡️ Traitors Win' : '🛡️ Faithful Win'}
+      <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <button
+              onClick={onBack}
+              className="text-sm text-slate-400 transition-colors hover:text-white"
+            >
+              ← Back to Games
+            </button>
+            <h2 className="mt-2 text-2xl font-bold text-white">{gameId}</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Round {replaySnapshot.round} · {replaySnapshot.phase}
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl bg-slate-800 px-4 py-3">
+              <div className="text-xs uppercase tracking-wider text-slate-400">Winner</div>
+              <div className={`mt-1 font-semibold ${winnerPresentation.className}`}>{winnerPresentation.label}</div>
+            </div>
+            <div className="rounded-xl bg-slate-800 px-4 py-3">
+              <div className="text-xs uppercase tracking-wider text-slate-400">Configuration</div>
+              <div className="mt-1 text-sm text-slate-100">{summary?.config?.n_players} players · {summary?.config?.n_traitors} traitors</div>
+            </div>
+            <div className="rounded-xl bg-slate-800 px-4 py-3">
+              <div className="text-xs uppercase tracking-wider text-slate-400">Event index</div>
+              <div className="mt-1 text-sm text-slate-100">{events.length === 0 ? 0 : currentEventIndex + 1} / {events.length}</div>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Main View */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Round Table - takes up 2 columns */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <RoundTable gameState={getCurrentState()} />
+          <RoundTable gameState={replaySnapshot} />
         </div>
 
-        {/* Event Log - takes up 1 column */}
         <div className="lg:col-span-1">
-          <EventLog 
-            events={events} 
+          <EventLog
+            events={events}
             currentIndex={currentEventIndex}
             onSelectEvent={setCurrentEventIndex}
           />
         </div>
       </div>
 
-      {/* Playback Controls */}
       <PlaybackControls
         currentIndex={currentEventIndex}
         totalEvents={events.length}
         isPlaying={isPlaying}
         playbackSpeed={playbackSpeed}
-        onPlay={() => setIsPlaying(true)}
+        onPlay={() => setIsPlaying(events.length > 1)}
         onPause={() => setIsPlaying(false)}
         onNext={() => setCurrentEventIndex(Math.min(currentEventIndex + 1, events.length - 1))}
         onPrev={() => setCurrentEventIndex(Math.max(currentEventIndex - 1, 0))}

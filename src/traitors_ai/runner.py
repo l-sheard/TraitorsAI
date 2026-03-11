@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-import os
 import random
-from typing import List, Optional
+from pathlib import Path
+from typing import Dict, List, Tuple
 
 import typer
 
@@ -21,6 +21,8 @@ app = typer.Typer(add_completion=False)
 def _parse_seeds(seed_arg: str) -> List[int]:
     if ".." in seed_arg:
         start, end = seed_arg.split("..")
+        if int(end) < int(start):
+            raise typer.BadParameter("Seed range end must be greater than or equal to the start")
         return list(range(int(start), int(end) + 1))
     return [int(seed_arg)]
 
@@ -32,7 +34,7 @@ def _init_game_state(config: GameConfig) -> GameState:
     alive = set(range(1, config.n_players + 1))
     agent_states = {
         pid: AgentPrivateState(
-            memory_summary="" if config.condition_name == "no_memory" else "",
+            memory_summary="",
             suspicion_scores={
                 other: 0.5 for other in alive if other != pid
             },
@@ -54,39 +56,79 @@ def _init_game_state(config: GameConfig) -> GameState:
     )
 
 
-def _build_agents(config: GameConfig, state: GameState) -> dict[int, TraitorsAgent]:
+def _build_agents(config: GameConfig, state: GameState) -> Tuple[Dict[int, TraitorsAgent], Dict[int, Dict[str, object]]]:
     rng = random.Random(config.seed)
-    personas = assign_personas(config.n_players, rng)
+    persona_cards = assign_personas(config.n_players, rng)
     llm = create_llm(config.model_name, config.temperature)
-    agents = {}
+    agents: Dict[int, TraitorsAgent] = {}
+    personas_by_player: Dict[int, Dict[str, object]] = {}
     for pid in range(1, config.n_players + 1):
+        persona = persona_cards[pid - 1]
         agents[pid] = TraitorsAgent(
             agent_id=pid,
-            persona=personas[pid - 1],
+            persona=persona,
             role=state.roles[pid].value,
             llm_client=llm,
             config=config,
         )
-    return agents
+        personas_by_player[pid] = persona
+    return agents, personas_by_player
+
+
+def _log_game_setup(
+    logger: JsonlLogger,
+    state: GameState,
+    personas_by_player: Dict[int, Dict[str, object]],
+) -> None:
+    logger.log_event(
+        game_id=state.game_id,
+        seed=state.config.seed,
+        condition=state.config.condition_name,
+        round_idx=0,
+        phase="setup",
+        actor_id=-1,
+        action_type="assign_roles",
+        payload={"roles": {pid: role.value for pid, role in state.roles.items()}},
+    )
+    for pid, persona in personas_by_player.items():
+        logger.log_event(
+            game_id=state.game_id,
+            seed=state.config.seed,
+            condition=state.config.condition_name,
+            round_idx=0,
+            phase="setup",
+            actor_id=pid,
+            action_type="assign_persona",
+            payload={"persona": persona},
+        )
+
+
+def _coerce_final_state(raw_state: GameState | dict) -> GameState:
+    if isinstance(raw_state, GameState):
+        return raw_state
+    return GameState.model_validate(raw_state)
 
 
 def _run_single_game(config: GameConfig, outdir: str) -> GameState:
     state = _init_game_state(config)
-    print(f"\n🎮 Starting game: {state.game_id}")
-    print(f"   Players: {config.n_players} ({config.n_traitors} traitors)")
-    print(f"   Seed: {config.seed}, Condition: {config.condition_name}\n")
-    log_dir = os.path.join(outdir, "logs")
-    logger = JsonlLogger(log_dir, state.game_id)
-    agents = _build_agents(config, state)
+    typer.echo(f"\n🎮 Starting game: {state.game_id}")
+    typer.echo(f"   Players: {config.n_players} ({config.n_traitors} traitors)")
+    typer.echo(f"   Seed: {config.seed}, Condition: {config.condition_name}\n")
+    log_dir = Path(outdir) / "logs"
+    logger = JsonlLogger(str(log_dir), state.game_id)
+    agents, personas_by_player = _build_agents(config, state)
+    _log_game_setup(logger, state, personas_by_player)
     graph = build_graph(agents, logger)
-    final_state = graph.invoke(state)
-    logger.write_summary(final_state)
+    final_state = _coerce_final_state(graph.invoke(state))
+    logger.write_summary(
+        final_state,
+        extra={
+            "personas": personas_by_player,
+        },
+    )
     logger.close()
-    # Handle dict return from LangGraph
-    winner = final_state["winner"] if isinstance(final_state, dict) else final_state.winner
-    round_idx = final_state["round_idx"] if isinstance(final_state, dict) else final_state.round_idx
-    print(f"\n✅ Game complete! Winner: {winner} after {round_idx} rounds")
-    print(f"   Logs: {log_dir}/{state.game_id}.jsonl\n")
+    typer.echo(f"\n✅ Game complete! Winner: {final_state.winner} after {final_state.round_idx} rounds")
+    typer.echo(f"   Logs: {log_dir / f'{state.game_id}.jsonl'}\n")
     return final_state
 
 
@@ -114,14 +156,10 @@ def run_one(
         max_rounds=max_rounds,
     )
     state = _run_single_game(config, outdir)
-    # Handle dict return from LangGraph
-    game_id = state["game_id"] if isinstance(state, dict) else state.game_id
-    winner = state["winner"] if isinstance(state, dict) else state.winner
-    round_idx = state["round_idx"] if isinstance(state, dict) else state.round_idx
     typer.echo(json.dumps({
-        "game_id": game_id,
-        "winner": winner,
-        "rounds": round_idx,
+        "game_id": state.game_id,
+        "winner": state.winner,
+        "rounds": state.round_idx,
     }))
 
 
@@ -138,7 +176,8 @@ def run_batch(
     outdir: str = typer.Option("results", help="Output directory"),
 ) -> None:
     load_env()
-    os.makedirs(outdir, exist_ok=True)
+    output_dir = Path(outdir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for seed in _parse_seeds(seeds):
         config = GameConfig(
@@ -163,7 +202,7 @@ def run_batch(
                 "faithful_win": state.winner == "faithful",
             }
         )
-    summary_path = os.path.join(outdir, "summary.csv")
+    summary_path = output_dir / "summary.csv"
     try:
         import pandas as pd  # type: ignore
 
@@ -172,7 +211,7 @@ def run_batch(
     except Exception:
         import csv
 
-        with open(summary_path, "w", newline="", encoding="utf-8") as handle:
+        with summary_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
             writer.writeheader()
             writer.writerows(rows)

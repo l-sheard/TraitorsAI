@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import json
-import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .schemas import EventLogRow, GameState
+from .schemas import EventLogRow, GameState, GameSummary
 
 
 class JsonlLogger:
     def __init__(self, outdir: str, game_id: str) -> None:
-        self.outdir = outdir
+        self.outdir = Path(outdir)
         self.game_id = game_id
-        os.makedirs(outdir, exist_ok=True)
-        self.log_path = os.path.join(outdir, f"{game_id}.jsonl")
-        self._file = open(self.log_path, "a", encoding="utf-8")
+        self.outdir.mkdir(parents=True, exist_ok=True)
+        self.log_path = self.outdir / f"{game_id}.jsonl"
+        self._file = self.log_path.open("a", encoding="utf-8")
 
     def log(self, row: EventLogRow) -> None:
         self._file.write(row.model_dump_json() + "\n")
@@ -44,37 +44,27 @@ class JsonlLogger:
         self.log(row)
 
     def write_summary(self, state: GameState | Dict[str, Any], extra: Optional[Dict[str, Any]] = None) -> str:
-        # Handle both GameState objects and dicts (LangGraph returns dicts)
         if isinstance(state, dict):
-            game_id = state["game_id"]
-            config = state["config"]
-            winner = state.get("winner")
-            round_idx = state["round_idx"]
-            eliminated_order = state.get("eliminated_order", [])
-            config_dict = config.model_dump() if hasattr(config, 'model_dump') else config
+            normalized_state = GameState.model_validate(state)
         else:
-            game_id = state.game_id
-            config_dict = state.config.model_dump()
-            winner = state.winner
-            round_idx = state.round_idx
-            eliminated_order = state.eliminated_order
-            config = state.config
-        
-        summary_path = os.path.join(self.outdir, f"{game_id}_summary.json")
-        summary = {
-            "game_id": game_id,
-            "seed": config.seed if hasattr(config, 'seed') else config_dict['seed'],
-            "condition": config.condition_name if hasattr(config, 'condition_name') else config_dict['condition_name'],
-            "winner": winner,
-            "rounds": round_idx,
-            "eliminated_order": eliminated_order,
-            "config": config_dict,
-        }
+            normalized_state = state
+
+        summary = GameSummary(
+            game_id=normalized_state.game_id,
+            seed=normalized_state.config.seed,
+            condition=normalized_state.config.condition_name,
+            winner=normalized_state.winner,
+            rounds=normalized_state.round_idx,
+            eliminated_order=normalized_state.eliminated_order,
+            config=normalized_state.config,
+            roles=normalized_state.roles,
+        ).model_dump(mode="json")
         if extra:
             summary.update(extra)
-        with open(summary_path, "w", encoding="utf-8") as handle:
+        summary_path = self.outdir / f"{normalized_state.game_id}_summary.json"
+        with summary_path.open("w", encoding="utf-8") as handle:
             json.dump(summary, handle, indent=2)
-        return summary_path
+        return str(summary_path)
 
     def close(self) -> None:
         self._file.close()
