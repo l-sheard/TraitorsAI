@@ -15,6 +15,7 @@ from traitors_ai.analysis import (  # noqa: E402
     compute_overall_metrics,
     compute_round_summary,
     compute_suspicion_gap_over_time,
+    compute_traitor_remaining_by_round,
     compute_traitor_vote_rate_by_round,
     compute_voting_accuracy_by_round,
     compute_win_rate_by_role,
@@ -167,6 +168,42 @@ def _make_mock_run_dir(tmp_path: Path, include_persona: bool = True) -> Path:
     per_agent = pd.DataFrame(per_agent_rows)
     per_agent.to_csv(run_dir / "per_agent_metrics.csv", index=False)
 
+    # Minimal structured game logs used by analysis figure helpers.
+    games_dir = run_dir / "games"
+    (games_dir / "g1").mkdir(parents=True, exist_ok=True)
+    (games_dir / "g2").mkdir(parents=True, exist_ok=True)
+
+    g1_summary = {
+        "game_id": "g1",
+        "roles": {"1": "traitor", "2": "traitor", "3": "faithful", "4": "faithful", "5": "faithful"},
+    }
+    g2_summary = {
+        "game_id": "g2",
+        "roles": {"1": "traitor", "2": "traitor", "3": "faithful", "4": "faithful", "5": "faithful"},
+    }
+    (games_dir / "g1" / "game_summary.json").write_text(json.dumps(g1_summary), encoding="utf-8")
+    (games_dir / "g2" / "game_summary.json").write_text(json.dumps(g2_summary), encoding="utf-8")
+
+    g1_events = [
+        {"action_type": "round_start", "round": 1, "payload": {"round": 1, "alive_count": 5, "traitors_alive": 2}},
+        {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 1}},
+        {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 3}},
+        {"action_type": "round_start", "round": 2, "payload": {"round": 2, "alive_count": 4, "traitors_alive": 1}},
+        {"action_type": "vote", "phase": "voting", "round": 2, "payload": {"target_id": 1}},
+    ]
+    g2_events = [
+        {"action_type": "round_start", "round": 1, "payload": {"round": 1, "alive_count": 5, "traitors_alive": 2}},
+        {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 2}},
+        {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 4}},
+        {"action_type": "round_start", "round": 2, "payload": {"round": 2, "alive_count": 4, "traitors_alive": 2}},
+        {"action_type": "vote", "phase": "voting", "round": 2, "payload": {"target_id": 3}},
+        {"action_type": "round_start", "round": 3, "payload": {"round": 3, "alive_count": 3, "traitors_alive": 1}},
+        {"action_type": "vote", "phase": "voting", "round": 3, "payload": {"target_id": 2}},
+    ]
+
+    (games_dir / "g1" / "events.jsonl").write_text("\n".join(json.dumps(e) for e in g1_events) + "\n", encoding="utf-8")
+    (games_dir / "g2" / "events.jsonl").write_text("\n".join(json.dumps(e) for e in g2_events) + "\n", encoding="utf-8")
+
     return run_dir
 
 
@@ -224,9 +261,11 @@ def test_analyse_experiment_writes_outputs_and_figures(tmp_path: Path) -> None:
 
     # Primary research figures
     assert (analysis_dir / "figures" / "fig_1_win_rate_by_role.png").exists()
-    # fig_3 requires events.jsonl which is absent in mock; it is skipped gracefully
+    assert (analysis_dir / "figures" / "fig_2_traitors_remaining_by_round.png").exists()
+    assert (analysis_dir / "figures" / "fig_3_voting_accuracy_by_round.png").exists()
     # Primary figure data tables
     assert (analysis_dir / "tables" / "fig_1_win_rate_by_role.csv").exists()
+    assert (analysis_dir / "tables" / "fig_2_traitors_remaining_by_round.csv").exists()
     assert (analysis_dir / "tables" / "fig_3_voting_accuracy_by_round.csv").exists()
 
 
@@ -290,14 +329,13 @@ def test_compute_banishment_outcomes() -> None:
 
 
 def test_new_primary_figures_created(tmp_path: Path) -> None:
-    """Fig 1 created from mock per_game data; fig 3 skipped (no events.jsonl in mock)."""
+    """All three primary figures should be created from mock structured logs."""
     run_dir = _make_mock_run_dir(tmp_path)
     result = analyse_experiment_1(run_dir=run_dir, dpi=72)
     figures = result["figures_created"]
     assert "fig_1_win_rate_by_role" in figures
-    # fig_3 requires events.jsonl; skipped gracefully when absent
-    assert "fig_3_voting_accuracy_by_round" not in figures
-    assert "fig_3_voting_accuracy_by_round" in result["figures_skipped"]
+    assert "fig_2_traitors_remaining_by_round" in figures
+    assert "fig_3_voting_accuracy_by_round" in figures
 
 
 def test_compute_win_rate_by_role() -> None:
@@ -373,3 +411,46 @@ def test_voting_accuracy_later_rounds_use_fewer_games() -> None:
     assert 2 in result["round"].values
     round_2 = result[result["round"] == 2].iloc[0]
     assert int(round_2["contributing_games"]) == 1  # only g2 reached round 2
+
+
+def test_compute_traitor_remaining_by_round_single_game() -> None:
+    game_events_data = [
+        (
+            [
+                {"action_type": "round_start", "round": 1, "payload": {"round": 1, "traitors_alive": 2}},
+                {"action_type": "round_start", "round": 2, "payload": {"round": 2, "traitors_alive": 2}},
+                {"action_type": "round_start", "round": 3, "payload": {"round": 3, "traitors_alive": 1}},
+            ],
+            {"game_id": "gA", "roles": {"1": "traitor", "2": "traitor", "3": "faithful"}},
+        )
+    ]
+    result = compute_traitor_remaining_by_round(game_events_data)
+    assert list(result["round"]) == [1, 2, 3]
+    assert result.loc[result["round"] == 1, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(1.0)
+    assert result.loc[result["round"] == 3, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(0.5)
+
+
+def test_compute_traitor_remaining_by_round_aggregates_lengths() -> None:
+    game_events_data = [
+        (
+            [
+                {"action_type": "round_start", "round": 1, "payload": {"round": 1, "traitors_alive": 2}},
+                {"action_type": "round_start", "round": 2, "payload": {"round": 2, "traitors_alive": 2}},
+                {"action_type": "round_start", "round": 3, "payload": {"round": 3, "traitors_alive": 1}},
+            ],
+            {"game_id": "gA", "roles": {"1": "traitor", "2": "traitor", "3": "faithful"}},
+        ),
+        (
+            [
+                {"action_type": "round_start", "round": 1, "payload": {"round": 1, "traitors_alive": 2}},
+                {"action_type": "round_start", "round": 2, "payload": {"round": 2, "traitors_alive": 1}},
+            ],
+            {"game_id": "gB", "roles": {"1": "traitor", "2": "traitor", "3": "faithful"}},
+        ),
+    ]
+    result = compute_traitor_remaining_by_round(game_events_data)
+    # Expected: round1=1.0, round2=(1.0+0.5)/2=0.75, round3=0.5 (only game A contributes)
+    assert result.loc[result["round"] == 1, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(1.0)
+    assert result.loc[result["round"] == 2, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(0.75)
+    assert result.loc[result["round"] == 3, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(0.5)
+    assert int(result.loc[result["round"] == 3, "contributing_games"].iloc[0]) == 1

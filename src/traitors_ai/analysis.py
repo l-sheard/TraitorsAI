@@ -1528,6 +1528,88 @@ def compute_voting_accuracy_by_round(
     return agg
 
 
+def compute_traitor_remaining_by_round(
+    game_events_data: List[Tuple[List[Dict[str, Any]], Dict[str, Any]]],
+) -> Any:
+    """Compute the mean percentage of original traitors alive at round start.
+
+    For each game and round reached:
+      traitor_remaining_rate = traitors_alive_at_start_of_round / initial_traitors
+
+    Round 1 should therefore start at 1.0 (100%) for valid games.
+
+    Returns a DataFrame with columns:
+      round, mean_traitor_remaining_rate, mean_traitor_remaining_percent,
+      sd_traitor_remaining_rate, contributing_games
+    """
+    pd, _, _ = _analysis_dependencies()
+    empty = pd.DataFrame(columns=[
+        "round",
+        "mean_traitor_remaining_rate",
+        "mean_traitor_remaining_percent",
+        "sd_traitor_remaining_rate",
+        "contributing_games",
+    ])
+    if not game_events_data:
+        return empty
+
+    rows: List[Dict[str, Any]] = []
+    for events, game_summary in game_events_data:
+        roles_raw = game_summary.get("roles", {})
+        if not isinstance(roles_raw, dict):
+            continue
+        roles = {int(k): v for k, v in roles_raw.items()}
+        initial_traitors = sum(1 for role in roles.values() if role == "traitor")
+        if initial_traitors <= 0:
+            continue
+        game_id = game_summary.get("game_id", "")
+
+        for e in events:
+            if e.get("action_type") != "round_start":
+                continue
+            payload = e.get("payload", {})
+            if not isinstance(payload, dict):
+                continue
+            r = payload.get("round", e.get("round"))
+            traitors_alive = payload.get("traitors_alive")
+            try:
+                round_num = int(r)
+                alive_traitors = float(traitors_alive)
+            except Exception:  # noqa: BLE001
+                continue
+            if round_num < 1:
+                continue
+            rate = alive_traitors / float(initial_traitors)
+            if rate < 0:
+                rate = 0.0
+            if rate > 1:
+                rate = 1.0
+            rows.append(
+                {
+                    "game_id": game_id,
+                    "round": round_num,
+                    "traitor_remaining_rate": rate,
+                }
+            )
+
+    if not rows:
+        return empty
+
+    df = pd.DataFrame(rows)
+    agg = (
+        df.groupby("round", dropna=True)
+        .agg(
+            mean_traitor_remaining_rate=("traitor_remaining_rate", "mean"),
+            sd_traitor_remaining_rate=("traitor_remaining_rate", "std"),
+            contributing_games=("game_id", pd.Series.nunique),
+        )
+        .reset_index()
+        .sort_values("round")
+    )
+    agg["mean_traitor_remaining_percent"] = agg["mean_traitor_remaining_rate"] * 100.0
+    return agg
+
+
 def create_figures(
     per_game: Any,
     per_round: Any,
@@ -1539,6 +1621,7 @@ def create_figures(
     export_svg: bool,
     ctx: ValidationContext,
     win_rate_df: Optional[Any] = None,
+    traitor_remaining_df: Optional[Any] = None,
     voting_accuracy_df: Optional[Any] = None,
 ) -> List[str]:
     pd, _, plt = _analysis_dependencies()
@@ -1573,6 +1656,33 @@ def create_figures(
         created.append("fig_1_win_rate_by_role")
     except Exception as exc:  # noqa: BLE001
         ctx.skipped_outputs["fig_1_win_rate_by_role"] = f"{exc}"
+
+    # Fig 2: Percentage of Original Traitors Remaining by Round
+    try:
+        df = traitor_remaining_df
+        if df is None or df.empty:
+            raise ValueError("traitor_remaining_df is empty or None")
+        x = pd.to_numeric(df["round"], errors="coerce")
+        y = pd.to_numeric(df["mean_traitor_remaining_percent"], errors="coerce")
+        sd = pd.to_numeric(df["sd_traitor_remaining_rate"], errors="coerce").fillna(0.0) * 100.0
+        lower = (y - sd).clip(lower=0.0, upper=100.0)
+        upper = (y + sd).clip(lower=0.0, upper=100.0)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.plot(x, y, marker="o", linewidth=2, label="Mean traitors remaining")
+        ax.fill_between(x, lower, upper, alpha=0.25, label="±1 SD")
+        ax.set_title("Percentage of Original Traitors Remaining by Round")
+        ax.set_xlabel("Round")
+        ax.set_ylabel("Original Traitors Remaining (%)")
+        ax.set_ylim(0.0, 100.0)
+        ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
+        ax.legend()
+        _save_figure(fig, figures_dir, "fig_2_traitors_remaining_by_round", dpi=dpi, export_svg=export_svg)
+        plt.close(fig)
+        created.append("fig_2_traitors_remaining_by_round")
+    except Exception as exc:  # noqa: BLE001
+        ctx.skipped_outputs["fig_2_traitors_remaining_by_round"] = f"{exc}"
 
     # Fig 3: Voting Accuracy by Round (PRIMARY — detection improvement over rounds)
     try:
@@ -1653,10 +1763,15 @@ def write_text_summaries(
         "Shows the overall proportion of games won by Faithful agents vs Traitor agents.",
         "This is the headline outcome: which side wins more often under baseline conditions.",
         "",
+        "**Figure 2 — Percentage of Original Traitors Remaining by Round** (`fig_2_traitors_remaining_by_round.png`)",
+        "Shows the mean percentage of each game's original traitors still alive at the start",
+        "of each round. A high or slowly falling curve indicates traitors remain undetected",
+        "for longer; a steep drop indicates earlier traitor elimination.",
+        "",
         "**Figure 3 — Voting Accuracy by Round** (`fig_3_voting_accuracy_by_round.png`)",
         "Shows whether agents increasingly cast banishment votes against actual traitors",
-        "as the game progresses, compared to a round-specific random-chance baseline.",
-        "An upward trend indicates improving collective identification of traitors over time.",
+        "as the game progresses. An upward trend indicates improving collective identification",
+        "of traitors over time.",
     ])
 
     poster_summary = "\n".join([
@@ -1675,8 +1790,11 @@ def write_text_summaries(
         f"- Fig 1: Win Rate by Role — Faithful: {_fmt_pct(faithful_win)}, Traitors: {_fmt_pct(traitor_win)}.",
         "  Shows which side wins more often overall.",
         "",
+        "- Fig 2: Percentage of Original Traitors Remaining by Round — how long original",
+        "  traitors stay alive from round start to round start.",
+        "",
         "- Fig 3: Voting Accuracy by Round — whether agents increasingly vote against actual traitors.",
-        "  Compared against a round-specific random-chance baseline.",
+        "  A rising line indicates improving traitor identification by voters.",
     ])
 
     key_lines = [
@@ -1694,8 +1812,11 @@ def write_text_summaries(
         "--- Figure interpretation ---",
         f"Figure 1 (Win Rate by Role): Faithful won {_fmt_pct(faithful_win)} of games; "
         f"Traitors won {_fmt_pct(traitor_win)}. This is the headline outcome figure.",
+        "Figure 2 (Percentage of Original Traitors Remaining by Round): a high or slowly "
+        "falling curve means traitors survive longer and evade early detection; a faster drop "
+        "means traitors are identified and eliminated earlier.",
         "Figure 3 (Voting Accuracy by Round): shows the proportion of banishment votes "
-        "targeting actual traitors each round, compared to the random-chance baseline. "
+        "targeting actual traitors each round. "
         "An upward trend indicates improving collective identification of traitors over time.",
     ]
 
@@ -1765,10 +1886,12 @@ def analyse_experiment_1(
     # Compute primary research figure data
     game_events_data = _load_game_events(run_dir)
     win_rate_df = compute_win_rate_by_role(data.per_game)
+    traitor_remaining_df = compute_traitor_remaining_by_round(game_events_data)
     voting_accuracy_df = compute_voting_accuracy_by_round(game_events_data)
 
     # Save primary figure data tables
     win_rate_df.to_csv(tables_dir / "fig_1_win_rate_by_role.csv", index=False)
+    traitor_remaining_df.to_csv(tables_dir / "fig_2_traitors_remaining_by_round.csv", index=False)
     voting_accuracy_df.to_csv(tables_dir / "fig_3_voting_accuracy_by_round.csv", index=False)
 
     created_figures = create_figures(
@@ -1782,6 +1905,7 @@ def analyse_experiment_1(
         export_svg=export_svg,
         ctx=ctx,
         win_rate_df=win_rate_df,
+        traitor_remaining_df=traitor_remaining_df,
         voting_accuracy_df=voting_accuracy_df,
     )
 
