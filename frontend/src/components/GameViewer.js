@@ -6,6 +6,23 @@ import RoundTable from './RoundTable';
 import VoteSummary from './VoteSummary';
 import EventLog from './EventLog';
 import PlaybackControls from './PlaybackControls';
+import TraitorChatPanel from './TraitorChatPanel';
+
+function trimEventsToFirstDiscussion(events) {
+  if (!Array.isArray(events) || events.length === 0) {
+    return [];
+  }
+
+  const firstDiscussionIndex = events.findIndex(
+    (event) => event.phase === 'discussion' || event.action_type === 'public_message'
+  );
+
+  if (firstDiscussionIndex < 0) {
+    return events;
+  }
+
+  return events.slice(firstDiscussionIndex);
+}
 
 function GameViewer({ gameId, onBack }) {
   const [summary, setSummary] = useState(null);
@@ -44,7 +61,7 @@ function GameViewer({ gameId, onBack }) {
       setIsPlaying(false);
       const replay = await fetchReplay(gameId);
       setSummary(replay.summary);
-      setEvents(replay.events);
+      setEvents(trimEventsToFirstDiscussion(replay.events));
     } catch (error) {
       console.error('Error loading game data:', error);
       setError('Unable to load this replay.');
@@ -121,6 +138,7 @@ function GameViewer({ gameId, onBack }) {
           <div className="space-y-6">
             <RoundTable gameState={replaySnapshot} />
             <VoteSummary voteSummary={replaySnapshot.voteSummary} round={replaySnapshot.round} />
+            <TraitorChatPanel events={replaySnapshot.events} currentRound={replaySnapshot.round} />
           </div>
         </div>
 
