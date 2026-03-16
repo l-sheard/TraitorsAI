@@ -1,6 +1,6 @@
 import React from 'react';
 
-function TraitorChatPanel({ events, currentRound }) {
+function TraitorChatPanel({ events, currentRound, maxHeight = '220px' }) {
   const messages = (events || []).filter(
     (event) => event.action_type === 'traitor_chat' && event.phase === 'traitor_chat'
   );
@@ -17,7 +17,7 @@ function TraitorChatPanel({ events, currentRound }) {
       {messages.length === 0 ? (
         <p className="text-sm text-rose-200/80">No private traitor messages up to this point.</p>
       ) : (
-        <div className="space-y-2" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+        <div className="space-y-2" style={{ maxHeight, overflowY: 'auto' }}>
           {messages.map((event, index) => (
             <div key={`${event.round}-${event.actor_id}-${index}`} className="rounded-lg bg-slate-900/50 p-3">
               <div className="mb-1 text-xs text-rose-300">

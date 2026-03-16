@@ -30,7 +30,7 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="w-full px-4 py-8 sm:px-6 lg:px-8">
           <h1 className="text-4xl font-bold">Traitors AI Replay Console</h1>
           <p className="mt-3 max-w-3xl text-slate-300">
             Browse deterministic social-deduction simulations,
@@ -39,7 +39,7 @@ function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <main className="w-full px-4 py-8 sm:px-6 lg:px-8">
         {!selectedGameId ? (
           <GameList
             games={games}

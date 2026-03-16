@@ -7,6 +7,7 @@ import VoteSummary from './VoteSummary';
 import EventLog from './EventLog';
 import PlaybackControls from './PlaybackControls';
 import TraitorChatPanel from './TraitorChatPanel';
+import PlayerSpeechPanel from './PlayerSpeechPanel';
 
 function trimEventsToFirstDiscussion(events) {
   if (!Array.isArray(events) || events.length === 0) {
@@ -133,23 +134,32 @@ function GameViewer({ gameId, onBack }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <div className="space-y-6">
-            <RoundTable gameState={replaySnapshot} />
-            <VoteSummary voteSummary={replaySnapshot.voteSummary} round={replaySnapshot.round} />
-            <TraitorChatPanel events={replaySnapshot.events} currentRound={replaySnapshot.round} />
-          </div>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
+        <div className="lg:col-span-6">
+          <RoundTable gameState={replaySnapshot} minHeight="420px" />
         </div>
 
-        <div className="lg:col-span-1">
-          <EventLog
-            events={events}
-            currentIndex={currentEventIndex}
-            onSelectEvent={setCurrentEventIndex}
-          />
+        <div className="lg:col-span-6">
+          <div className="space-y-4">
+            <PlayerSpeechPanel
+              events={replaySnapshot.events}
+              currentRound={replaySnapshot.round}
+              maxHeight="260px"
+            />
+            <TraitorChatPanel
+              events={replaySnapshot.events}
+              currentRound={replaySnapshot.round}
+              maxHeight="260px"
+            />
+          </div>
         </div>
       </div>
+
+      <VoteSummary
+        voteSummary={replaySnapshot.voteSummary}
+        round={replaySnapshot.round}
+        maxHeight="340px"
+      />
 
       <PlaybackControls
         currentIndex={currentEventIndex}
@@ -163,6 +173,15 @@ function GameViewer({ gameId, onBack }) {
         onSeek={setCurrentEventIndex}
         onSpeedChange={setPlaybackSpeed}
       />
+
+      <div>
+        <EventLog
+          events={events}
+          currentIndex={currentEventIndex}
+          onSelectEvent={setCurrentEventIndex}
+          maxHeight="340px"
+        />
+      </div>
     </div>
   );
 }

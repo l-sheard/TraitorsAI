@@ -1,6 +1,6 @@
 import React from 'react';
 
-function EventLog({ events, currentIndex, onSelectEvent }) {
+function EventLog({ events, currentIndex, onSelectEvent, maxHeight = '600px' }) {
   const getEventIcon = (event) => {
     switch (event.action_type) {
       case 'public_message': return '💬';
@@ -42,7 +42,7 @@ function EventLog({ events, currentIndex, onSelectEvent }) {
   };
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4" style={{ maxHeight, overflowY: 'auto' }}>
       <h3 className="mb-4 text-xl font-bold text-white">Event Log</h3>
       <div className="space-y-2">
         {events.map((event, index) => (

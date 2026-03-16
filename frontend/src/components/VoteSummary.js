@@ -62,7 +62,7 @@ function VoteSection({ title, subtitle, rows, counts, accentClass, emptyLabel })
   );
 }
 
-function VoteSummary({ voteSummary, round }) {
+function VoteSummary({ voteSummary, round, maxHeight = null }) {
   if (!voteSummary) {
     return null;
   }
@@ -70,7 +70,10 @@ function VoteSummary({ voteSummary, round }) {
   const hasVotes = voteSummary.banishVotes.length || voteSummary.revote.length || voteSummary.murderVotes.length;
 
   return (
-    <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5">
+    <div
+      className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900 p-5"
+      style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}
+    >
       <div className="flex items-center justify-between gap-4">
         <div>
           <h3 className="text-xl font-bold text-white">Vote Overview</h3>

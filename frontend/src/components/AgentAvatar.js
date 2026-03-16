@@ -46,15 +46,6 @@ function AgentAvatar({ player }) {
         </div>
         <div className="text-xs text-slate-400">{getStatusLabel()}</div>
       </div>
-
-      {player.speaking && player.message && (
-        <div className="absolute -top-2 left-20 bg-gray-900 text-white text-xs rounded-lg p-2 shadow-lg max-w-xs z-10 border border-yellow-400">
-          <div className="line-clamp-3">{player.message}</div>
-          <div className="absolute left-0 top-1/2 transform -translate-x-2 -translate-y-1/2">
-            <div className="w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-yellow-400"></div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
