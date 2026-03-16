@@ -6,10 +6,14 @@ function PlayerSpeechPanel({ events, currentRound, maxHeight = '280px' }) {
   const roundMessages = useMemo(
     () =>
       (events || []).filter(
-        (event) =>
-          event.action_type === 'public_message' &&
-          event.phase === 'discussion' &&
-          event.round === currentRound
+        (event) => {
+          const isDiscussionMessage =
+            event.action_type === 'public_message' && event.phase === 'discussion';
+          const isVoteMessage =
+            event.action_type === 'vote' && (event.phase === 'voting' || event.phase === 'revote');
+
+          return (isDiscussionMessage || isVoteMessage) && event.round === currentRound;
+        }
       ),
     [events, currentRound]
   );
@@ -34,14 +38,21 @@ function PlayerSpeechPanel({ events, currentRound, maxHeight = '280px' }) {
         {roundMessages.length === 0 ? (
           <p className="text-sm text-slate-500">No message yet this round.</p>
         ) : (
-          roundMessages.map((event, index) => (
-            <div key={`${event.round}-${event.actor_id}-${index}`} className="rounded-lg border border-slate-800 bg-slate-800/70 p-3">
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                P{event.actor_id}
+          roundMessages.map((event, index) => {
+            const isVote = event.action_type === 'vote';
+            const body = isVote
+              ? `Votes for P${event.payload?.target_id ?? '?'}${event.payload?.rationale ? ` - ${event.payload.rationale}` : ''}`
+              : event.payload?.content || '';
+
+            return (
+              <div key={`${event.round}-${event.actor_id}-${index}`} className="rounded-lg border border-slate-800 bg-slate-800/70 p-3">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  P{event.actor_id}{isVote ? ' - Vote' : ''}
+                </div>
+                <div className="text-sm text-slate-100">{body}</div>
               </div>
-              <div className="text-sm text-slate-100">{event.payload?.content || ''}</div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

@@ -3,7 +3,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { fetchReplay } from '../api/replayApi';
 import { buildReplaySnapshot, getWinnerPresentation } from '../lib/replayState';
 import RoundTable from './RoundTable';
-import VoteSummary from './VoteSummary';
 import EventLog from './EventLog';
 import PlaybackControls from './PlaybackControls';
 import TraitorChatPanel from './TraitorChatPanel';
@@ -134,6 +133,19 @@ function GameViewer({ gameId, onBack }) {
         </div>
       </div>
 
+      <PlaybackControls
+        currentIndex={currentEventIndex}
+        totalEvents={events.length}
+        isPlaying={isPlaying}
+        playbackSpeed={playbackSpeed}
+        onPlay={() => setIsPlaying(events.length > 1)}
+        onPause={() => setIsPlaying(false)}
+        onNext={() => setCurrentEventIndex(Math.min(currentEventIndex + 1, events.length - 1))}
+        onPrev={() => setCurrentEventIndex(Math.max(currentEventIndex - 1, 0))}
+        onSeek={setCurrentEventIndex}
+        onSpeedChange={setPlaybackSpeed}
+      />
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
         <div className="lg:col-span-6">
           <RoundTable gameState={replaySnapshot} minHeight="420px" />
@@ -154,25 +166,6 @@ function GameViewer({ gameId, onBack }) {
           </div>
         </div>
       </div>
-
-      <VoteSummary
-        voteSummary={replaySnapshot.voteSummary}
-        round={replaySnapshot.round}
-        maxHeight="340px"
-      />
-
-      <PlaybackControls
-        currentIndex={currentEventIndex}
-        totalEvents={events.length}
-        isPlaying={isPlaying}
-        playbackSpeed={playbackSpeed}
-        onPlay={() => setIsPlaying(events.length > 1)}
-        onPause={() => setIsPlaying(false)}
-        onNext={() => setCurrentEventIndex(Math.min(currentEventIndex + 1, events.length - 1))}
-        onPrev={() => setCurrentEventIndex(Math.max(currentEventIndex - 1, 0))}
-        onSeek={setCurrentEventIndex}
-        onSpeedChange={setPlaybackSpeed}
-      />
 
       <div>
         <EventLog
