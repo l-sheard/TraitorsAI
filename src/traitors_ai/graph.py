@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import math
+import random
 from typing import Dict, List, Optional, Tuple
 
 from langgraph.graph import END, StateGraph
@@ -11,19 +12,23 @@ from .logging_utils import JsonlLogger
 from .schemas import GameState, PublicMessage, validate_vote_action
 
 
-def _public_summary(messages: List[PublicMessage], max_chars: int = 600) -> str:
+def _public_summary(messages: List[PublicMessage], player_names: Optional[Dict[int, str]] = None, max_chars: int = 600) -> str:
     if not messages:
         return "No public messages yet."
     tail = messages[-6:]
-    joined = " ".join([f"P{m.speaker_id}: {m.content}" for m in tail])
+    def label(pid: int) -> str:
+        return player_names.get(pid, f"P{pid}") if player_names else f"P{pid}"
+    joined = " ".join([f"{label(m.speaker_id)}: {m.content}" for m in tail])
     return joined[-max_chars:]
 
 
-def _traitor_summary(messages: List[PublicMessage], max_chars: int = 400) -> str:
+def _traitor_summary(messages: List[PublicMessage], player_names: Optional[Dict[int, str]] = None, max_chars: int = 400) -> str:
     if not messages:
         return "No private traitor messages yet."
     tail = messages[-6:]
-    joined = " ".join([f"P{m.speaker_id}: {m.content}" for m in tail])
+    def label(pid: int) -> str:
+        return player_names.get(pid, f"P{pid}") if player_names else f"P{pid}"
+    joined = " ".join([f"{label(m.speaker_id)}: {m.content}" for m in tail])
     return joined[-max_chars:]
 
 
@@ -33,10 +38,35 @@ def _top_k_suspicion(scores: Dict[int, float], self_id: int, k: int) -> List[int
     return sorted(filtered, key=lambda x: filtered[x], reverse=True)[:k]
 
 
+_ALIAS_POOL = [
+    "Alice", "Bob", "Charlie", "Diana", "Ethan", "Fiona", "George", "Hannah", "Isaac", "Julia",
+    "Kevin", "Lila", "Mason", "Nora", "Owen", "Priya", "Quinn", "Ruby", "Sam", "Tara",
+    "Uma", "Victor", "Willa", "Xander", "Yasmin", "Zane", "Ava", "Ben", "Clara", "Daniel",
+    "Elena", "Felix", "Grace", "Henry", "Ivy", "Jonah", "Kira", "Leo", "Mia", "Noah",
+]
+
+
+def _llm_alias_map(state: GameState) -> Dict[int, str]:
+    """Deterministic per-game aliasing for LLM prompts to reduce numeric ID bias."""
+    all_ids = sorted(state.roles.keys())
+    rng = random.Random(state.config.seed)
+    pool = _ALIAS_POOL.copy()
+    rng.shuffle(pool)
+
+    aliases: Dict[int, str] = {}
+    for idx, pid in enumerate(all_ids):
+        if idx < len(pool):
+            aliases[pid] = pool[idx]
+        else:
+            aliases[pid] = f"Player{idx + 1}"
+    return aliases
+
+
 def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa: C901
     def discussion_node(state: GameState) -> GameState:
         # Log round_start event on first entry into discussion for this round
         alive_ids = sorted(state.alive)
+        aliases = _llm_alias_map(state)
         alive_traitors = sorted(state.traitors & state.alive)
         alive_faithful = sorted(state.alive - state.traitors)
         state.round_tracking.append({
@@ -62,8 +92,8 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
             },
         )
         print(f"Round {state.round_idx} - Discussion phase ({len(state.alive)} alive)")
-        player_names = {pid: f"P{pid}" for pid in alive_ids}
-        public_summary = _public_summary(state.public_transcript)
+        player_names = {pid: aliases[pid] for pid in alive_ids}
+        public_summary = _public_summary(state.public_transcript, player_names)
         for pid in alive_ids:
             agent = agents[pid]
             private_state = state.agent_states[pid]
@@ -142,8 +172,9 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
 
     def voting_node(state: GameState) -> GameState:
         alive_ids = sorted(state.alive)
-        player_names = {pid: f"P{pid}" for pid in alive_ids}
-        public_summary = _public_summary(state.public_transcript)
+        aliases = _llm_alias_map(state)
+        player_names = {pid: aliases[pid] for pid in alive_ids}
+        public_summary = _public_summary(state.public_transcript, player_names)
         votes: Dict[int, int] = {}
         for pid in alive_ids:
             agent = agents[pid]
@@ -213,12 +244,14 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
                 agent = agents[pid]
                 private_state = state.agent_states[pid]
                 actor_role = state.roles[pid].value
-                player_names = {cid: f"P{cid}" for cid in sorted(state.alive)}
+                alive_sorted = sorted(state.alive)
+                aliases = _llm_alias_map(state)
+                player_names = {cid: aliases[cid] for cid in alive_sorted}
                 view = agent.build_view(
                     round_idx=state.round_idx,
-                    alive_ids=sorted(state.alive),
+                    alive_ids=alive_sorted,
                     player_names=player_names,
-                    public_summary=_public_summary(state.public_transcript),
+                    public_summary=_public_summary(state.public_transcript, player_names),
                     private_state=private_state,
                     traitor_ids=sorted(state.traitors),
                     allowed_targets=tied,
@@ -287,9 +320,10 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
             return state
         alive_traitors = sorted(state.traitors & state.alive)
         alive_ids = sorted(state.alive)
-        player_names = {pid: f"P{pid}" for pid in alive_ids}
-        public_summary = _public_summary(state.public_transcript)
-        traitor_summary = _traitor_summary(state.traitor_private_transcript)
+        aliases = _llm_alias_map(state)
+        player_names = {pid: aliases[pid] for pid in alive_ids}
+        public_summary = _public_summary(state.public_transcript, player_names)
+        traitor_summary = _traitor_summary(state.traitor_private_transcript, player_names)
         for pid in alive_traitors:
             agent = agents[pid]
             private_state = state.agent_states[pid]
@@ -337,9 +371,10 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
             return state
         alive_traitors = sorted(state.traitors & state.alive)
         alive_ids = sorted(state.alive)
-        player_names = {pid: f"P{pid}" for pid in alive_ids}
-        public_summary = _public_summary(state.public_transcript)
-        traitor_summary = _traitor_summary(state.traitor_private_transcript)
+        aliases = _llm_alias_map(state)
+        player_names = {pid: aliases[pid] for pid in alive_ids}
+        public_summary = _public_summary(state.public_transcript, player_names)
+        traitor_summary = _traitor_summary(state.traitor_private_transcript, player_names)
         murder_votes: Dict[int, int] = {}
         for pid in alive_traitors:
             agent = agents[pid]
@@ -446,7 +481,11 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
         return "discussion"
 
     def post_murder_update(state: GameState) -> GameState:
-        public_summary = _public_summary(state.public_transcript)
+        alive_ids = sorted(state.alive)
+        aliases = _llm_alias_map(state)
+        player_names = {pid: aliases[pid] for pid in alive_ids}
+        all_player_names = {pid: aliases[pid] for pid in sorted(state.roles.keys())}
+        public_summary = _public_summary(state.public_transcript, player_names)
         round_messages = [message for message in state.public_transcript if message.round == state.round_idx]
         vote_record = state.vote_history[-1]["votes"] if state.vote_history else {}
         current_round = state.round_tracking[-1] if state.round_tracking else {}
@@ -465,6 +504,7 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
                 murdered_player=murdered_player,
                 roles=state.roles,
                 alive_ids=sorted(state.alive),
+                player_names=all_player_names,
             )
             new_summary = state.agent_states[pid].memory_summary
             logger.log_event(

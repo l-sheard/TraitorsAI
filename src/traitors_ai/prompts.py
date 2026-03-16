@@ -44,11 +44,13 @@ def belief_update_prompt(
     memory_summary: str,
     top_suspicions: str,
     format_instructions: str,
+    name_to_id: str = "",
 ) -> str:
     return (
         "Update your private suspicion scores for ALL OTHER alive players.\n"
         "Use raw integer player IDs as JSON keys, for example: {\"1\": 0.65, \"4\": 0.15}.\n"
-        "Return scores in [0,1] and a short internal note.\n"
+        + (f"Player name-to-ID reference: {name_to_id}\n" if name_to_id else "")
+        + "Return scores in [0,1] and a short internal note.\n"
         "Output MUST be valid JSON only.\n\n"
         f"Persona card:\n{persona_card}\n\n"
         + _base_context(role, round_idx, alive_players, public_summary, memory_summary, top_suspicions)
@@ -86,10 +88,12 @@ def vote_prompt(
     top_suspicions: str,
     format_instructions: str,
     allowed_targets: str = "",
+    name_to_id: str = "",
 ) -> str:
     return (
         "Select a banish vote target (alive player other than yourself).\n"
-        "Return `target_id` as an integer only, not a label like P3.\n"
+        "Return `target_id` as an integer only.\n"
+        + (f"Player name-to-ID reference: {name_to_id}\n" if name_to_id else "")
         + (f"Allowed targets: {allowed_targets}\n" if allowed_targets else "")
         + "Output MUST be valid JSON only.\n\n"
         f"Persona card:\n{persona_card}\n\n"
@@ -107,7 +111,7 @@ def traitor_chat_prompt(
     public_summary: str,
     memory_summary: str,
     top_suspicions: str,
-    traitor_ids: List[int],
+    traitor_names: List[str],
     traitor_summary: str,
 ) -> str:
     return (
@@ -116,7 +120,7 @@ def traitor_chat_prompt(
         "Output ONLY the message text.\n\n"
         f"Persona card:\n{persona_card}\n\n"
         + _base_context(role, round_idx, alive_players, public_summary, memory_summary, top_suspicions)
-        + f"\nKnown traitors: {traitor_ids}\n"
+        + f"\nYour fellow traitors: {', '.join(traitor_names)}\n"
         + f"Private traitor chat summary: {traitor_summary}\n"
     )
 
@@ -129,17 +133,19 @@ def murder_prompt(
     public_summary: str,
     memory_summary: str,
     top_suspicions: str,
-    traitor_ids: List[int],
+    traitor_names: List[str],
     traitor_summary: str,
     format_instructions: str,
+    name_to_id: str = "",
 ) -> str:
     return (
         "Choose a faithful player to murder (alive, non-traitor).\n"
-        "Return `target_id` as an integer only, not a label like P3.\n"
-        "Output MUST be valid JSON only.\n\n"
+        "Return `target_id` as an integer only.\n"
+        + (f"Player name-to-ID reference: {name_to_id}\n" if name_to_id else "")
+        + "Output MUST be valid JSON only.\n\n"
         f"Persona card:\n{persona_card}\n\n"
         + _base_context(role, round_idx, alive_players, public_summary, memory_summary, top_suspicions)
-        + f"\nKnown traitors: {traitor_ids}\n"
+        + f"\nYour fellow traitors: {', '.join(traitor_names)}\n"
         + f"Private traitor chat summary: {traitor_summary}\n"
         + "\nFormat instructions:\n"
         + format_instructions

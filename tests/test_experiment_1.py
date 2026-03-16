@@ -615,6 +615,7 @@ class TestAgentMemory:
 class _StubAgent:
     def __init__(self, agent_id: int, vote_plan: Dict[int, int], murder_plan: Dict[int, int]):
         self.id = agent_id
+        self.persona = {"name": f"P{agent_id}"}
         self.vote_plan = vote_plan
         self.murder_plan = murder_plan
 
