@@ -168,3 +168,51 @@ contains one of: `suspect`, `suspicious`, `traitor`, `lying`, `liar`, `untrustwo
 
 **defence_rate** - a message is counted if it mentions another player AND contains one of:
 `trust`, `innocent`, `faithful`, `defend`, `clear`, `vouch`, `agree with`.
+
+### Experiment 1 analysis pipeline
+
+Install analysis dependencies:
+
+```bash
+pip install -e .[analysis]
+```
+
+Run post-hoc analysis for one run directory:
+
+```bash
+python -m traitors_ai.analysis analyse-experiment-1 \
+  --run-dir results/experiment_1_baseline_behaviour/run_<id>/
+```
+
+Optional flags:
+
+```bash
+python -m traitors_ai.analysis analyse-experiment-1 \
+  --run-dir results/experiment_1_baseline_behaviour/run_<id>/ \
+  --export-svg \
+  --include-raw-log-pass \
+  --dpi 200
+```
+
+Analysis outputs are written to:
+
+```
+results/experiment_1_baseline_behaviour/run_<id>/analysis/
+  tables/
+  figures/
+  text/
+  diagnostics/
+```
+
+Primary result figures:
+
+- **`fig_1_win_rate_by_role`** — *Overall game outcome.*  
+  Bar chart showing the proportion of games won by Faithful agents vs Traitor agents.  
+  The headline result: which side wins more often under baseline conditions.
+
+- **`fig_3_voting_accuracy_by_round`** — *Detection improvement over time.*  
+  Line chart showing the fraction of banishment votes targeting an actual traitor each round,  
+  plotted against the round-specific random-chance baseline.  
+  An upward trend indicates agents increasingly identify traitors as the game progresses.
+
+Underlying data is exported to `tables/fig_1_win_rate_by_role.csv` and `tables/fig_3_voting_accuracy_by_round.csv`.

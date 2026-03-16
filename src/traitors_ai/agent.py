@@ -69,8 +69,11 @@ class TraitorsAgent:
         top = ordered[:3]
         return ", ".join([f"P{pid}:{score:.2f}" for pid, score in top])
 
-    def _alive_names(self, alive: List[int], player_names: Dict[int, str]) -> List[str]:
-        return [player_names[pid] for pid in alive]
+    def _alive_names(self, alive: List[int], player_names: Dict[int, str], rng=None) -> List[str]:
+        ordered = list(alive)
+        if rng is not None:
+            rng.shuffle(ordered)
+        return [player_names[pid] for pid in ordered]
 
     def _clip_text(self, text: str, limit: int = 120) -> str:
         compact = " ".join(text.split())
@@ -307,7 +310,7 @@ class TraitorsAgent:
         return {
             "round": round_idx,
             "alive_ids": alive_ids,
-            "alive_names": self._alive_names(alive_ids, player_names),
+            "alive_names": self._alive_names(alive_ids, player_names, rng),
             "public_summary": public_summary,
             "memory_summary": memory_summary,
             "top_suspicions": self._top_suspicions(private_state),

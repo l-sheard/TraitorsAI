@@ -176,6 +176,16 @@ class ExperimentOutputManager:
             writer.writerows(rows)
         return str(path)
 
+    def append_csv_row(self, filename: str, row: Dict[str, Any]) -> None:
+        """Append a single row to a CSV file, writing the header if the file is new."""
+        path = self.run_dir / filename
+        write_header = not path.exists() or path.stat().st_size == 0
+        with path.open("a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+            if write_header:
+                writer.writeheader()
+            writer.writerow(row)
+
     def write_json(self, filename: str, data: Any) -> str:
         path = self.run_dir / filename
         with path.open("w", encoding="utf-8") as f:

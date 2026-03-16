@@ -497,6 +497,7 @@ def experiment_1_run_batch(
                 raise typer.Exit(code=1)
         else:
             per_game_rows.append(result)
+            output_manager.append_csv_row("per_game_metrics.csv", result)
 
     if not per_game_rows:
         typer.echo("\n\u274c All games failed. No aggregate outputs written.")
@@ -525,6 +526,94 @@ def experiment_1_run_batch(
 # ---------------------------------------------------------------------------
 
 
+def _rebuild_csvs_from_games_dir(games_dir: Path, run_id: str, output_manager: ExperimentOutputManager) -> int:
+    """Scan games_dir for saved game files and rebuild all experiment CSVs.
+
+    Returns the number of games successfully processed.
+    """
+    per_game_rows: List[Dict[str, object]] = []
+    all_round_rows: List[Dict[str, object]] = []
+    all_agent_rows: List[Dict[str, object]] = []
+
+    game_dirs = sorted(d for d in games_dir.iterdir() if d.is_dir())
+    for game_dir in game_dirs:
+        events_path = game_dir / "events.jsonl"
+        summary_path = game_dir / "game_summary.json"
+        if not summary_path.exists():
+            typer.echo(f"  Skipping {game_dir.name}: no game_summary.json")
+            continue
+        events: List[Dict[str, object]] = []
+        if events_path.exists():
+            with events_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if stripped:
+                        events.append(json.loads(stripped))
+        with summary_path.open("r", encoding="utf-8") as f:
+            game_summary = json.load(f)
+        try:
+            game_metrics = compute_game_metrics(events, game_summary)
+            per_game_rows.append(game_metrics)
+            all_round_rows.extend(compute_round_metrics(events, game_summary))
+            all_agent_rows.extend(compute_agent_metrics(events, game_summary))
+            typer.echo(f"  Loaded {game_summary.get('game_id', game_dir.name)}")
+        except Exception as exc:  # noqa: BLE001
+            typer.echo(f"  Warning: failed to process {game_dir.name}: {exc}")
+
+    if not per_game_rows:
+        return 0
+
+    output_manager.write_csv("per_game_metrics.csv", per_game_rows)
+    output_manager.write_csv("per_round_metrics.csv", all_round_rows)
+    output_manager.write_csv("per_agent_metrics.csv", all_agent_rows)
+    agg = aggregate_experiment_metrics(per_game_rows, EXPERIMENT_NAME, run_id)
+    output_manager.write_csv("summary.csv", [agg])
+    output_manager.write_json("summary.json", agg)
+
+    return len(per_game_rows)
+
+
+@app.command("rebuild-experiment-1-csvs")
+def rebuild_experiment_1_csvs(
+    run_dir: str = typer.Argument(..., help="Path to the run directory (e.g. results/experiment_1_baseline_behaviour/run_<id>)"),
+) -> None:
+    """Rebuild all experiment CSVs from saved game files in a (possibly partial) run directory.
+
+    Use this to regenerate per_game_metrics.csv, per_round_metrics.csv,
+    per_agent_metrics.csv, summary.csv and summary.json after an interrupted batch run,
+    so you can then run the analysis pipeline on the saved games.
+    """
+    run_path = Path(run_dir)
+    if not run_path.exists():
+        typer.echo(f"Error: run directory not found: {run_path}")
+        raise typer.Exit(code=1)
+    games_dir = run_path / "games"
+    if not games_dir.exists():
+        typer.echo(f"Error: games/ subdirectory not found in {run_path}")
+        raise typer.Exit(code=1)
+
+    run_id = run_path.name.removeprefix("run_")
+    # Reconstruct output_manager pointing at the existing run dir by passing parent dirs
+    base_outdir = str(run_path.parent.parent)
+    output_manager = ExperimentOutputManager(base_outdir, run_id)
+
+    typer.echo(f"\n\U0001f527 Rebuilding CSVs from saved game files")
+    typer.echo(f"Run dir : {run_path}")
+
+    n = _rebuild_csvs_from_games_dir(games_dir, run_id, output_manager)
+    if n == 0:
+        typer.echo("\n\u274c No valid game files found. Nothing written.")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"\n\u2705 Rebuilt CSVs from {n} game(s). Run the analysis pipeline to generate graphs:")
+    typer.echo(f"   python -m traitors_ai.analysis analyse-experiment-1 --run-dir {run_path}")
+
+
+# ---------------------------------------------------------------------------
+# Shared output writer
+# ---------------------------------------------------------------------------
+
+
 def _write_experiment_outputs(
     output_manager: ExperimentOutputManager,
     per_game_rows: List[Dict[str, object]],
@@ -534,7 +623,7 @@ def _write_experiment_outputs(
     """Write per_game_metrics.csv, per_round_metrics.csv, per_agent_metrics.csv,
     summary.csv and summary.json for the completed batch."""
 
-    # per_game_metrics.csv
+    # per_game_metrics.csv (overwrite the incrementally-written file with final consistent data)
     output_manager.write_csv("per_game_metrics.csv", per_game_rows)
 
     # per_round_metrics.csv and per_agent_metrics.csv – load from saved game summaries
