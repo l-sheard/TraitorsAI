@@ -30,7 +30,7 @@ def _base_context(
         f"Round: {round_idx}\n"
         f"Alive players: {', '.join(alive_players)}\n"
         f"Public transcript summary: {public_summary}\n"
-        f"Your memory summary: {memory_summary}\n"
+        f"Your structured memory of prior rounds: {memory_summary}\n"
         f"Top suspicions: {top_suspicions}\n"
     )
 

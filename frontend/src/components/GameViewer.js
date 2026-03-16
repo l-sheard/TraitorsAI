@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { fetchReplay } from '../api/replayApi';
 import { buildReplaySnapshot, getWinnerPresentation } from '../lib/replayState';
 import RoundTable from './RoundTable';
+import VoteSummary from './VoteSummary';
 import EventLog from './EventLog';
 import PlaybackControls from './PlaybackControls';
 
@@ -117,7 +118,10 @@ function GameViewer({ gameId, onBack }) {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <RoundTable gameState={replaySnapshot} />
+          <div className="space-y-6">
+            <RoundTable gameState={replaySnapshot} />
+            <VoteSummary voteSummary={replaySnapshot.voteSummary} round={replaySnapshot.round} />
+          </div>
         </div>
 
         <div className="lg:col-span-1">

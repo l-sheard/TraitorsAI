@@ -1,6 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from typing import Dict, List, Tuple
+import math
+from typing import Dict, List, Optional, Tuple
 
 from langgraph.graph import END, StateGraph
 
@@ -26,15 +27,47 @@ def _traitor_summary(messages: List[PublicMessage], max_chars: int = 400) -> str
     return joined[-max_chars:]
 
 
-def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
+def _top_k_suspicion(scores: Dict[int, float], self_id: int, k: int) -> List[int]:
+    """Return the top-k most suspicious player ids (excluding self)."""
+    filtered = {pid: s for pid, s in scores.items() if pid != self_id}
+    return sorted(filtered, key=lambda x: filtered[x], reverse=True)[:k]
+
+
+def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa: C901
     def discussion_node(state: GameState) -> GameState:
-        print(f"Round {state.round_idx} - Discussion phase ({len(state.alive)} alive)")
+        # Log round_start event on first entry into discussion for this round
         alive_ids = sorted(state.alive)
+        alive_traitors = sorted(state.traitors & state.alive)
+        alive_faithful = sorted(state.alive - state.traitors)
+        state.round_tracking.append({
+            "round": state.round_idx,
+            "alive_count": len(alive_ids),
+            "traitors_alive": len(alive_traitors),
+            "faithful_alive": len(alive_faithful),
+        })
+        logger.log_event(
+            game_id=state.game_id,
+            seed=state.config.seed,
+            condition=state.config.condition_name,
+            round_idx=state.round_idx,
+            phase="round_start",
+            actor_id=-1,
+            action_type="round_start",
+            payload={
+                "round": state.round_idx,
+                "alive_count": len(alive_ids),
+                "traitors_alive": len(alive_traitors),
+                "faithful_alive": len(alive_faithful),
+                "alive_ids": alive_ids,
+            },
+        )
+        print(f"Round {state.round_idx} - Discussion phase ({len(state.alive)} alive)")
         player_names = {pid: f"P{pid}" for pid in alive_ids}
         public_summary = _public_summary(state.public_transcript)
         for pid in alive_ids:
             agent = agents[pid]
             private_state = state.agent_states[pid]
+            actor_role = state.roles[pid].value
             view = agent.build_view(
                 round_idx=state.round_idx,
                 alive_ids=alive_ids,
@@ -46,6 +79,7 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
             )
             if state.config.condition_name != "no_memory":
                 belief_update, error = agent.update_beliefs(view)
+                is_fallback = belief_update.notes == "fallback neutral"
                 normalized = {
                     other: belief_update.scores.get(other, 0.5)
                     for other in alive_ids
@@ -53,6 +87,13 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                 }
                 private_state.suspicion_scores = normalized
                 private_state.last_rationale = belief_update.notes
+                if error:
+                    state.llm_error_count += 1
+                if is_fallback:
+                    state.belief_update_fallback_count += 1
+                    state.parse_failure_count += 1
+                # Build sorted list for logging
+                top_sorted = _top_k_suspicion(normalized, pid, len(normalized))
                 logger.log_event(
                     game_id=state.game_id,
                     seed=state.config.seed,
@@ -62,10 +103,13 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                     actor_id=pid,
                     action_type="belief_update",
                     payload={
-                        "scores": belief_update.scores,
+                        "scores": {str(k): v for k, v in belief_update.scores.items()},
                         "notes": belief_update.notes,
+                        "top_suspicious_sorted": top_sorted,
                         "error": error,
+                        "is_fallback": is_fallback,
                     },
+                    actor_role=actor_role,
                 )
             for _ in range(state.config.discussion_turns):
                 content = agent.speak(view)
@@ -84,7 +128,14 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                     phase="discussion",
                     actor_id=pid,
                     action_type="public_message",
-                    payload=message.model_dump(),
+                    payload={
+                        "content": content,
+                        "char_length": len(content),
+                        "round": message.round,
+                        "phase": message.phase,
+                        "speaker_id": pid,
+                    },
+                    actor_role=actor_role,
                 )
         state.phase = "discussion"
         return state
@@ -97,6 +148,7 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
         for pid in alive_ids:
             agent = agents[pid]
             private_state = state.agent_states[pid]
+            actor_role = state.roles[pid].value
             view = agent.build_view(
                 round_idx=state.round_idx,
                 alive_ids=alive_ids,
@@ -106,13 +158,28 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                 traitor_ids=sorted(state.traitors),
                 rng=state.rng,
             )
+            # Capture top-k suspicions before vote for belief-action alignment
+            suspicion_snapshot = private_state.suspicion_scores or {}
+            top2 = _top_k_suspicion(suspicion_snapshot, pid, 2)
+            top1_suspicious = top2[0] if len(top2) >= 1 else None
+            top2_suspicious = top2[1] if len(top2) >= 2 else None
+
             vote_action, error = agent.vote(view)
+            is_valid = True
+            is_fallback = False
             try:
                 validate_vote_action(vote_action, pid, state.alive)
                 target = vote_action.target_id
             except Exception:  # noqa: BLE001
+                is_valid = False
+                is_fallback = True
                 candidates = [cid for cid in alive_ids if cid != pid]
                 target = state.rng.choice(candidates)
+            if error:
+                state.llm_error_count += 1
+            if is_fallback:
+                state.vote_fallback_count += 1
+                state.parse_failure_count += 1
             votes[pid] = target
             logger.log_event(
                 game_id=state.game_id,
@@ -126,7 +193,11 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                     "target_id": target,
                     "rationale": vote_action.rationale,
                     "error": error,
+                    "is_fallback": is_fallback,
+                    "top1_suspicious": top1_suspicious,
+                    "top2_suspicious": top2_suspicious,
                 },
+                actor_role=actor_role,
             )
         state.vote_history.append({"round": state.round_idx, "votes": votes})
         state.phase = "voting"
@@ -141,6 +212,7 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
             for pid in sorted(state.alive):
                 agent = agents[pid]
                 private_state = state.agent_states[pid]
+                actor_role = state.roles[pid].value
                 player_names = {cid: f"P{cid}" for cid in sorted(state.alive)}
                 view = agent.build_view(
                     round_idx=state.round_idx,
@@ -153,10 +225,16 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                     rng=state.rng,
                 )
                 action, error = agent.vote(view)
+                is_fallback = False
                 target = action.target_id
                 if target not in tied or target == pid:
+                    is_fallback = True
                     choices = [cid for cid in tied if cid != pid]
                     target = state.rng.choice(choices)
+                if error:
+                    state.llm_error_count += 1
+                if is_fallback:
+                    state.vote_fallback_count += 1
                 revote[pid] = target
                 logger.log_event(
                     game_id=state.game_id,
@@ -166,7 +244,13 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                     phase="revote",
                     actor_id=pid,
                     action_type="vote",
-                    payload={"target_id": target, "rationale": action.rationale, "error": error},
+                    payload={
+                        "target_id": target,
+                        "rationale": action.rationale,
+                        "error": error,
+                        "is_fallback": is_fallback,
+                    },
+                    actor_role=actor_role,
                 )
             eliminated, tie_info = apply_vote(state.alive, revote, state.rng)
             if eliminated is None:
@@ -175,17 +259,24 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
         if eliminated is not None:
             state.alive.remove(eliminated)
             state.eliminated_order.append(eliminated)
+            if state.round_tracking:
+                state.round_tracking[-1]["banished_player"] = eliminated
             role = state.roles[eliminated].value
-            print(f"   ⚖️  Banished: P{eliminated} ({role})")
+            print(f"   \u2696\ufe0f  Banished: P{eliminated} ({role})")
+        eliminated_role = state.roles[eliminated].value if eliminated is not None else None
         logger.log_event(
             game_id=state.game_id,
             seed=state.config.seed,
             condition=state.config.condition_name,
             round_idx=state.round_idx,
             phase="banish",
-            actor_id=eliminated or -1,
+            actor_id=-1,
             action_type="banish_result",
-            payload={"eliminated": eliminated, "tie_info": tie_info},
+            payload={
+                "eliminated": eliminated,
+                "eliminated_role": eliminated_role,
+                "tie_info": tie_info,
+            },
         )
         state.phase = "post_banish"
         return state
@@ -228,7 +319,14 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                 phase="traitor_chat",
                 actor_id=pid,
                 action_type="traitor_chat",
-                payload=message.model_dump(),
+                payload={
+                    "content": content,
+                    "char_length": len(content),
+                    "round": message.round,
+                    "phase": message.phase,
+                    "speaker_id": pid,
+                },
+                actor_role="traitor",
             )
         state.phase = "traitor_chat"
         return state
@@ -257,10 +355,17 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                 rng=state.rng,
             )
             action, error = agent.choose_murder(view)
+            is_fallback = False
             target = action.target_id
             if target in state.traitors or target not in state.alive or target == pid:
+                is_fallback = True
                 candidates = [cid for cid in alive_ids if cid not in state.traitors]
                 target = state.rng.choice(candidates)
+            if error:
+                state.llm_error_count += 1
+            if is_fallback:
+                state.murder_fallback_count += 1
+                state.parse_failure_count += 1
             murder_votes[pid] = target
             logger.log_event(
                 game_id=state.game_id,
@@ -270,22 +375,36 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                 phase="murder",
                 actor_id=pid,
                 action_type="murder",
-                payload={"target_id": target, "rationale": action.rationale, "error": error},
+                payload={
+                    "target_id": target,
+                    "rationale": action.rationale,
+                    "error": error,
+                    "is_fallback": is_fallback,
+                },
+                actor_role="traitor",
             )
+        state.murder_vote_history.append({"round": state.round_idx, "murder_votes": {str(k): v for k, v in murder_votes.items()}})
         eliminated = apply_murder(state.alive, state.traitors, murder_votes, state.rng)
         if eliminated is not None:
             state.alive.remove(eliminated)
             state.eliminated_order.append(eliminated)
-            print(f"   🔪 Murdered: P{eliminated} (faithful)")
+            if state.round_tracking:
+                state.round_tracking[-1]["murdered_player"] = eliminated
+            print(f"   \U0001f52a Murdered: P{eliminated} (faithful)")
+        eliminated_role = state.roles[eliminated].value if eliminated is not None else None
         logger.log_event(
             game_id=state.game_id,
             seed=state.config.seed,
             condition=state.config.condition_name,
             round_idx=state.round_idx,
             phase="murder",
-            actor_id=eliminated or -1,
+            actor_id=-1,
             action_type="murder_result",
-            payload={"eliminated": eliminated},
+            payload={
+                "eliminated": eliminated,
+                "eliminated_role": eliminated_role,
+                "murder_votes": {str(k): v for k, v in murder_votes.items()},
+            },
         )
         state.phase = "post_murder"
         return state
@@ -296,6 +415,9 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
             winner = "draw"
         if winner:
             state.winner = winner
+            alive_final = sorted(state.alive)
+            traitors_final = sorted(state.alive & state.traitors)
+            faithful_final = sorted(state.alive - state.traitors)
             logger.log_event(
                 game_id=state.game_id,
                 seed=state.config.seed,
@@ -304,7 +426,13 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
                 phase="terminal",
                 actor_id=-1,
                 action_type="game_end",
-                payload={"winner": winner},
+                payload={
+                    "winner": winner,
+                    "total_rounds": state.round_idx,
+                    "final_alive": alive_final,
+                    "final_traitors_alive": traitors_final,
+                    "final_faithful_alive": faithful_final,
+                },
             )
         return state
 
@@ -319,8 +447,51 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):
 
     def post_murder_update(state: GameState) -> GameState:
         public_summary = _public_summary(state.public_transcript)
+        round_messages = [message for message in state.public_transcript if message.round == state.round_idx]
+        vote_record = state.vote_history[-1]["votes"] if state.vote_history else {}
+        current_round = state.round_tracking[-1] if state.round_tracking else {}
+        banished_player = current_round.get("banished_player")
+        murdered_player = current_round.get("murdered_player")
+        pre_summaries: Dict[int, str] = {}
         for pid in state.alive:
-            agents[pid].update_memory_after_round(state.agent_states[pid], public_summary)
+            pre_summaries[pid] = state.agent_states[pid].memory_summary
+            agents[pid].update_memory_after_round(
+                state.agent_states[pid],
+                public_summary,
+                round_idx=state.round_idx,
+                public_messages=round_messages,
+                vote_record=vote_record,
+                banished_player=banished_player,
+                murdered_player=murdered_player,
+                roles=state.roles,
+                alive_ids=sorted(state.alive),
+            )
+            new_summary = state.agent_states[pid].memory_summary
+            logger.log_event(
+                game_id=state.game_id,
+                seed=state.config.seed,
+                condition=state.config.condition_name,
+                round_idx=state.round_idx,
+                phase="post_murder",
+                actor_id=pid,
+                action_type="memory_update",
+                payload={
+                    "previous_summary": pre_summaries[pid],
+                    "new_summary": new_summary,
+                    "summary_length": len(new_summary),
+                },
+                actor_role=state.roles[pid].value,
+            )
+        logger.log_event(
+            game_id=state.game_id,
+            seed=state.config.seed,
+            condition=state.config.condition_name,
+            round_idx=state.round_idx,
+            phase="round_end",
+            actor_id=-1,
+            action_type="round_end",
+            payload={"round": state.round_idx},
+        )
         state.round_idx += 1
         return state
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Optional, Tuple, Type
 
 from langchain_core.output_parsers import PydanticOutputParser
@@ -8,7 +9,12 @@ from pydantic import BaseModel
 
 from .parsing import StructuredResponseNormalizer
 from . import prompts
-from .schemas import AgentPrivateState, BeliefUpdate, MurderAction, VoteAction
+from .schemas import AgentPrivateState, BeliefUpdate, MurderAction, PublicMessage, Role, VoteAction
+
+
+_PLAYER_REF_PATTERN = re.compile(r"\bP\d+\b")
+_ACCUSATION_PATTERN = re.compile(r"\b(suspect|suspicious|traitor|lying|liar|untrustworthy)\b", re.IGNORECASE)
+_DEFENCE_PATTERN = re.compile(r"\b(trust|innocent|faithful|defend|clear|vouch)\b|agree with", re.IGNORECASE)
 
 
 class TraitorsAgent:
@@ -65,6 +71,51 @@ class TraitorsAgent:
 
     def _alive_names(self, alive: List[int], player_names: Dict[int, str]) -> List[str]:
         return [player_names[pid] for pid in alive]
+
+    def _clip_text(self, text: str, limit: int = 120) -> str:
+        compact = " ".join(text.split())
+        if len(compact) <= limit:
+            return compact
+        return compact[: limit - 3].rstrip() + "..."
+
+    def _extract_message_tags(self, content: str, speaker_id: int) -> str:
+        mentioned_players = [token for token in _PLAYER_REF_PATTERN.findall(content) if token != f"P{speaker_id}"]
+        tags: List[str] = []
+        if mentioned_players and _ACCUSATION_PATTERN.search(content):
+            tags.append("accuses " + ", ".join(mentioned_players[:2]))
+        if mentioned_players and _DEFENCE_PATTERN.search(content):
+            tags.append("defends " + ", ".join(mentioned_players[:2]))
+        return "; ".join(tags)
+
+    def _compose_memory_summary(self, state: AgentPrivateState, alive_ids: List[int]) -> str:
+        sections: List[str] = []
+
+        if state.round_summaries:
+            sections.append("Recent rounds: " + " | ".join(state.round_summaries[-3:]))
+
+        player_lines: List[str] = []
+        for pid in alive_ids:
+            if pid == self.id:
+                continue
+            parts: List[str] = []
+            if pid in state.player_notes:
+                parts.append(state.player_notes[pid])
+            if pid in state.vote_memory and state.vote_memory[pid]:
+                recent_votes = ", ".join([f"P{target}" for target in state.vote_memory[pid][-2:]])
+                parts.append(f"recent votes {recent_votes}")
+            if parts:
+                player_lines.append(f"P{pid}: " + "; ".join(parts))
+        if player_lines:
+            sections.append("Player notes: " + " | ".join(player_lines[:6]))
+
+        if state.elimination_memory:
+            sections.append("Eliminations: " + " | ".join(state.elimination_memory[-4:]))
+
+        if not sections:
+            return "No useful memory yet."
+
+        summary = " || ".join(sections)
+        return self._clip_text(summary, limit=1400)
 
     def update_beliefs(self, view: Dict[str, object]) -> Tuple[BeliefUpdate, Optional[str]]:
         parser = PydanticOutputParser(pydantic_object=BeliefUpdate)
@@ -164,12 +215,79 @@ class TraitorsAgent:
             return MurderAction(target_id=target, rationale="fallback"), error
         return result, error
 
-    def update_memory_after_round(self, state: AgentPrivateState, public_summary: str) -> None:
+    def update_memory_after_round(
+        self,
+        state: AgentPrivateState,
+        public_summary: str,
+        *,
+        round_idx: Optional[int] = None,
+        public_messages: Optional[List[PublicMessage]] = None,
+        vote_record: Optional[Dict[int, int]] = None,
+        banished_player: Optional[int] = None,
+        murdered_player: Optional[int] = None,
+        roles: Optional[Dict[int, Role]] = None,
+        alive_ids: Optional[List[int]] = None,
+    ) -> None:
         if self.config.condition_name == "no_memory":
             state.memory_summary = ""
+            state.round_summaries = []
+            state.player_notes = {}
+            state.last_public_messages = {}
+            state.vote_memory = {}
+            state.elimination_memory = []
             return
-        combined = (state.memory_summary + " " + public_summary).strip()
-        state.memory_summary = combined[-600:]
+
+        round_messages = public_messages or []
+        round_parts: List[str] = []
+
+        latest_by_speaker: Dict[int, PublicMessage] = {}
+        for message in round_messages:
+            latest_by_speaker[message.speaker_id] = message
+
+        for speaker_id, message in latest_by_speaker.items():
+            clipped = self._clip_text(message.content, limit=100)
+            state.last_public_messages[speaker_id] = clipped
+            tag = self._extract_message_tags(message.content, speaker_id)
+            if tag:
+                state.player_notes[speaker_id] = f"said '{clipped}' ({tag})"
+            else:
+                state.player_notes[speaker_id] = f"said '{clipped}'"
+            round_parts.append(f"P{speaker_id} said '{clipped}'")
+
+        if vote_record:
+            for voter_id, target_id in vote_record.items():
+                history = state.vote_memory.setdefault(voter_id, [])
+                history.append(target_id)
+                state.vote_memory[voter_id] = history[-3:]
+                if voter_id != self.id:
+                    existing = state.player_notes.get(voter_id, "")
+                    vote_note = f"voted P{target_id}"
+                    state.player_notes[voter_id] = (existing + "; " + vote_note).strip("; ") if existing else vote_note
+            round_parts.append(
+                "votes " + ", ".join([f"P{voter}->P{target}" for voter, target in sorted(vote_record.items())])
+            )
+
+        if banished_player is not None:
+            banished_role = roles.get(banished_player).value if roles and banished_player in roles else "unknown"
+            state.elimination_memory.append(f"R{round_idx}: banished P{banished_player} ({banished_role})")
+            round_parts.append(f"banished P{banished_player}")
+
+        if murdered_player is not None:
+            murdered_role = roles.get(murdered_player).value if roles and murdered_player in roles else "unknown"
+            state.elimination_memory.append(f"R{round_idx}: murdered P{murdered_player} ({murdered_role})")
+            round_parts.append(f"murdered P{murdered_player}")
+
+        state.elimination_memory = state.elimination_memory[-6:]
+
+        round_label = f"R{round_idx}" if round_idx is not None else "Recent round"
+        if round_parts:
+            state.round_summaries.append(f"{round_label}: " + "; ".join(round_parts[:6]))
+        elif public_summary:
+            state.round_summaries.append(f"{round_label}: {self._clip_text(public_summary, limit=180)}")
+        state.round_summaries = state.round_summaries[-5:]
+
+        relevant_alive = alive_ids or sorted({pid for pid in state.player_notes if pid != self.id})
+        state.memory_summary = self._compose_memory_summary(state, relevant_alive)
 
     def build_view(
         self,
@@ -184,12 +302,14 @@ class TraitorsAgent:
         allowed_targets: List[int] | None = None,
         rng,
     ) -> Dict[str, object]:
+        memory_summary = self._compose_memory_summary(private_state, alive_ids)
+        private_state.memory_summary = memory_summary
         return {
             "round": round_idx,
             "alive_ids": alive_ids,
             "alive_names": self._alive_names(alive_ids, player_names),
             "public_summary": public_summary,
-            "memory_summary": private_state.memory_summary,
+            "memory_summary": memory_summary,
             "top_suspicions": self._top_suspicions(private_state),
             "traitor_ids": traitor_ids,
             "traitor_summary": traitor_summary,
