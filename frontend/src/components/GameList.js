@@ -55,8 +55,8 @@ function GameList({ games, loading, error, onRefresh, onSelectGame }) {
         {games.map((game) => (
           <button
             type="button"
-            key={game.game_id}
-            onClick={() => onSelectGame(game.game_id)}
+            key={game.replay_id || game.game_id}
+            onClick={() => onSelectGame(game.replay_id || game.game_id)}
             className="rounded-xl border border-slate-800 bg-slate-800/80 p-5 text-left transition hover:-translate-y-0.5 hover:border-sky-500 hover:bg-slate-800"
           >
             <div className="flex items-start justify-between gap-4">

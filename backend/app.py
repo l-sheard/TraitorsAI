@@ -24,7 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-RESULTS_DIR = Path(os.getenv("TRAITORS_RESULTS_DIR", Path(__file__).parent.parent / "results" / "logs"))
+RESULTS_DIR = Path(os.getenv("TRAITORS_RESULTS_DIR", Path(__file__).parent.parent / "results"))
 repository = ReplayRepository(RESULTS_DIR)
 
 
