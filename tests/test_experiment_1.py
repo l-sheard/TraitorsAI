@@ -1,8 +1,9 @@
-﻿"""
+"""
 Tests for Experiment 1 features.
 
 All tests are self-contained and require no LLM API calls.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,6 +50,7 @@ class _DummyLLM:
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
 
+
 def _make_game_summary(
     *,
     game_id: str = "test-1-abcd1234",
@@ -60,8 +62,17 @@ def _make_game_summary(
     eliminated_order: List[int] | None = None,
 ) -> Dict[str, Any]:
     if roles is None:
-        roles = {1: "traitor", 2: "traitor", 3: "faithful", 4: "faithful", 5: "faithful",
-                 6: "faithful", 7: "faithful", 8: "faithful", 9: "faithful"}
+        roles = {
+            1: "traitor",
+            2: "traitor",
+            3: "faithful",
+            4: "faithful",
+            5: "faithful",
+            6: "faithful",
+            7: "faithful",
+            8: "faithful",
+            9: "faithful",
+        }
     if eliminated_order is None:
         eliminated_order = [1, 3, 2]
     final_alive = sorted(set(roles.keys()) - set(eliminated_order))
@@ -86,9 +97,17 @@ def _make_game_summary(
     }
 
 
-def _make_vote_event(game_id: str, seed: int, round_: int, actor_id: int, target_id: int,
-                     top1: int | None = None, top2: int | None = None,
-                     is_fallback: bool = False, error: str | None = None) -> Dict[str, Any]:
+def _make_vote_event(
+    game_id: str,
+    seed: int,
+    round_: int,
+    actor_id: int,
+    target_id: int,
+    top1: int | None = None,
+    top2: int | None = None,
+    is_fallback: bool = False,
+    error: str | None = None,
+) -> Dict[str, Any]:
     return {
         "game_id": game_id,
         "seed": seed,
@@ -109,8 +128,9 @@ def _make_vote_event(game_id: str, seed: int, round_: int, actor_id: int, target
     }
 
 
-def _make_belief_event(game_id: str, seed: int, round_: int, actor_id: int,
-                       scores: Dict[int, float]) -> Dict[str, Any]:
+def _make_belief_event(
+    game_id: str, seed: int, round_: int, actor_id: int, scores: Dict[int, float]
+) -> Dict[str, Any]:
     return {
         "game_id": game_id,
         "seed": seed,
@@ -129,7 +149,9 @@ def _make_belief_event(game_id: str, seed: int, round_: int, actor_id: int,
     }
 
 
-def _make_banish_event(game_id: str, seed: int, round_: int, eliminated: int, eliminated_role: str) -> Dict[str, Any]:
+def _make_banish_event(
+    game_id: str, seed: int, round_: int, eliminated: int, eliminated_role: str
+) -> Dict[str, Any]:
     return {
         "game_id": game_id,
         "seed": seed,
@@ -143,8 +165,9 @@ def _make_banish_event(game_id: str, seed: int, round_: int, eliminated: int, el
     }
 
 
-def _make_public_msg_event(game_id: str, seed: int, round_: int, actor_id: int,
-                            content: str) -> Dict[str, Any]:
+def _make_public_msg_event(
+    game_id: str, seed: int, round_: int, actor_id: int, content: str
+) -> Dict[str, Any]:
     return {
         "game_id": game_id,
         "seed": seed,
@@ -158,8 +181,9 @@ def _make_public_msg_event(game_id: str, seed: int, round_: int, actor_id: int,
     }
 
 
-def _make_round_start_event(game_id: str, seed: int, round_: int, alive_count: int,
-                             traitors_alive: int, faithful_alive: int) -> Dict[str, Any]:
+def _make_round_start_event(
+    game_id: str, seed: int, round_: int, alive_count: int, traitors_alive: int, faithful_alive: int
+) -> Dict[str, Any]:
     return {
         "game_id": game_id,
         "seed": seed,
@@ -179,8 +203,9 @@ def _make_round_start_event(game_id: str, seed: int, round_: int, alive_count: i
     }
 
 
-def _make_murder_event(game_id: str, seed: int, round_: int, actor_id: int,
-                        target_id: int, is_fallback: bool = False) -> Dict[str, Any]:
+def _make_murder_event(
+    game_id: str, seed: int, round_: int, actor_id: int, target_id: int, is_fallback: bool = False
+) -> Dict[str, Any]:
     return {
         "game_id": game_id,
         "seed": seed,
@@ -189,7 +214,12 @@ def _make_murder_event(game_id: str, seed: int, round_: int, actor_id: int,
         "phase": "murder",
         "actor_id": actor_id,
         "action_type": "murder",
-        "payload": {"target_id": target_id, "rationale": "test", "is_fallback": is_fallback, "error": None},
+        "payload": {
+            "target_id": target_id,
+            "rationale": "test",
+            "is_fallback": is_fallback,
+            "error": None,
+        },
         "timestamp_utc": "2026-01-01T00:00:00",
     }
 
@@ -197,6 +227,7 @@ def _make_murder_event(game_id: str, seed: int, round_: int, actor_id: int,
 # ---------------------------------------------------------------------------
 # Seed parsing
 # ---------------------------------------------------------------------------
+
 
 class TestParseSeeeds:
     def test_single_seed(self):
@@ -218,6 +249,7 @@ class TestParseSeeeds:
 # ---------------------------------------------------------------------------
 # Banishment accuracy
 # ---------------------------------------------------------------------------
+
 
 class TestBanishmentAccuracy:
     def test_all_traitors_banished(self):
@@ -268,6 +300,7 @@ class TestBanishmentAccuracy:
 # Belief-action alignment
 # ---------------------------------------------------------------------------
 
+
 class TestBeliefActionAlignment:
     def test_top1_alignment_perfect(self):
         gs = _make_game_summary()
@@ -315,6 +348,7 @@ class TestBeliefActionAlignment:
 # Suspicion gap
 # ---------------------------------------------------------------------------
 
+
 class TestSuspicionGap:
     def test_positive_gap(self):
         """Faithful agent assigns high suspicion to traitors."""
@@ -339,6 +373,7 @@ class TestSuspicionGap:
 # ---------------------------------------------------------------------------
 # Traitor vote agreement
 # ---------------------------------------------------------------------------
+
 
 class TestTraitorVoteAgreement:
     def test_full_agreement(self):
@@ -373,6 +408,7 @@ class TestTraitorVoteAgreement:
 # ---------------------------------------------------------------------------
 # Communication metrics (accusation / defence heuristics)
 # ---------------------------------------------------------------------------
+
 
 class TestCommunicationMetrics:
     def test_accusation_rate(self):
@@ -409,6 +445,7 @@ class TestCommunicationMetrics:
 # ---------------------------------------------------------------------------
 # ExperimentOutputManager – directory creation
 # ---------------------------------------------------------------------------
+
 
 class TestExperimentOutputManager:
     def test_creates_run_directory(self, tmp_path):
@@ -448,24 +485,41 @@ class TestExperimentOutputManager:
 # Aggregate experiment metrics
 # ---------------------------------------------------------------------------
 
+
 class TestAggregateMetrics:
     def test_basic_aggregation(self):
         rows = [
             {
-                "game_id": "g1", "seed": 1, "winner": "faithful", "faithful_win": True,
-                "traitor_win": False, "total_rounds": 8,
-                "banishment_accuracy": 0.6, "deception_success_rate": 0.4,
-                "belief_action_alignment_top1": 0.7, "belief_action_alignment_top2": 0.9,
-                "suspicion_gap": 0.3, "traitor_vote_agreement_rate": 0.5,
-                "murder_vote_agreement_rate": 0.4, "structured_output_parse_failures_count": 0,
+                "game_id": "g1",
+                "seed": 1,
+                "winner": "faithful",
+                "faithful_win": True,
+                "traitor_win": False,
+                "total_rounds": 8,
+                "banishment_accuracy": 0.6,
+                "deception_success_rate": 0.4,
+                "belief_action_alignment_top1": 0.7,
+                "belief_action_alignment_top2": 0.9,
+                "suspicion_gap": 0.3,
+                "traitor_vote_agreement_rate": 0.5,
+                "murder_vote_agreement_rate": 0.4,
+                "structured_output_parse_failures_count": 0,
             },
             {
-                "game_id": "g2", "seed": 2, "winner": "traitors", "faithful_win": False,
-                "traitor_win": True, "total_rounds": 12,
-                "banishment_accuracy": 0.2, "deception_success_rate": 0.8,
-                "belief_action_alignment_top1": 0.3, "belief_action_alignment_top2": 0.5,
-                "suspicion_gap": 0.1, "traitor_vote_agreement_rate": 0.7,
-                "murder_vote_agreement_rate": 0.6, "structured_output_parse_failures_count": 2,
+                "game_id": "g2",
+                "seed": 2,
+                "winner": "traitors",
+                "faithful_win": False,
+                "traitor_win": True,
+                "total_rounds": 12,
+                "banishment_accuracy": 0.2,
+                "deception_success_rate": 0.8,
+                "belief_action_alignment_top1": 0.3,
+                "belief_action_alignment_top2": 0.5,
+                "suspicion_gap": 0.1,
+                "traitor_vote_agreement_rate": 0.7,
+                "murder_vote_agreement_rate": 0.6,
+                "structured_output_parse_failures_count": 2,
             },
         ]
         agg = aggregate_experiment_metrics(rows, "experiment_1_baseline_behaviour", "run001")
@@ -485,6 +539,7 @@ class TestAggregateMetrics:
 # ---------------------------------------------------------------------------
 # Per-round metric computation
 # ---------------------------------------------------------------------------
+
 
 class TestPerRoundMetrics:
     def test_round_metrics_structure(self):
@@ -511,11 +566,14 @@ class TestPerRoundMetrics:
 # Per-agent metric computation
 # ---------------------------------------------------------------------------
 
+
 class TestPerAgentMetrics:
     def test_agent_metrics_structure(self):
         gs = _make_game_summary()
         events = [
-            _make_vote_event("g1", 1, 1, 3, target_id=1, top1=1, top2=2),  # faithful P3 votes traitor P1
+            _make_vote_event(
+                "g1", 1, 1, 3, target_id=1, top1=1, top2=2
+            ),  # faithful P3 votes traitor P1
             _make_public_msg_event("g1", 1, 1, 3, "I suspect P1 looks untrustworthy"),
             _make_belief_event("g1", 1, 1, 3, {1: 0.8, 2: 0.6, 4: 0.2, 5: 0.1}),
         ]
@@ -549,7 +607,9 @@ class TestAgentMemory:
         )
         private_state = AgentPrivateState(suspicion_scores={2: 0.5, 3: 0.5, 4: 0.5})
         public_messages = [
-            PublicMessage(round=1, phase="discussion", speaker_id=2, content="I suspect P3 is a traitor."),
+            PublicMessage(
+                round=1, phase="discussion", speaker_id=2, content="I suspect P3 is a traitor."
+            ),
             PublicMessage(round=1, phase="discussion", speaker_id=3, content="I trust P4 for now."),
         ]
 
@@ -561,7 +621,13 @@ class TestAgentMemory:
             vote_record={1: 2, 2: 3, 3: 2, 4: 2},
             banished_player=4,
             murdered_player=5,
-            roles={1: Role.faithful, 2: Role.faithful, 3: Role.faithful, 4: Role.traitor, 5: Role.faithful},
+            roles={
+                1: Role.faithful,
+                2: Role.faithful,
+                3: Role.faithful,
+                4: Role.traitor,
+                5: Role.faithful,
+            },
             alive_ids=[1, 2, 3],
         )
 
@@ -611,6 +677,7 @@ class TestAgentMemory:
 # ---------------------------------------------------------------------------
 # Graph elimination behavior
 # ---------------------------------------------------------------------------
+
 
 class _StubAgent:
     def __init__(self, agent_id: int, vote_plan: Dict[int, int], murder_plan: Dict[int, int]):
@@ -703,9 +770,15 @@ class TestEliminationBehavior:
         final_state = GameState.model_validate(graph.invoke(state))
         logger.close()
 
-        assert check_terminal(final_state.alive, final_state.traitors & final_state.alive) == "faithful"
+        assert (
+            check_terminal(final_state.alive, final_state.traitors & final_state.alive)
+            == "faithful"
+        )
 
-        events = [json.loads(line) for line in (tmp_path / "test-game.jsonl").read_text(encoding="utf-8").splitlines()]
+        events = [
+            json.loads(line)
+            for line in (tmp_path / "test-game.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
 
         banish_results = [e for e in events if e["action_type"] == "banish_result"]
         murder_results = [e for e in events if e["action_type"] == "murder_result"]
@@ -713,8 +786,11 @@ class TestEliminationBehavior:
         assert all(e["actor_id"] == -1 for e in murder_results)
 
         later_round_actions = [
-            e for e in events
-            if e["round"] >= 2 and e["action_type"] in {"belief_update", "public_message", "vote", "traitor_chat", "murder"}
+            e
+            for e in events
+            if e["round"] >= 2
+            and e["action_type"]
+            in {"belief_update", "public_message", "vote", "traitor_chat", "murder"}
         ]
         acting_ids = {e["actor_id"] for e in later_round_actions}
         assert 1 not in acting_ids

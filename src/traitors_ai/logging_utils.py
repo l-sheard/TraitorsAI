@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 import json
@@ -67,7 +67,9 @@ class JsonlLogger:
         )
         self.log(row)
 
-    def write_summary(self, state: GameState | Dict[str, Any], extra: Optional[Dict[str, Any]] = None) -> str:
+    def write_summary(
+        self, state: GameState | Dict[str, Any], extra: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Write a basic game summary (used by the original run-one / run-batch commands)."""
         if isinstance(state, dict):
             normalized_state = GameState.model_validate(state)

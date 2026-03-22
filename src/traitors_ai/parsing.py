@@ -51,7 +51,9 @@ class StructuredResponseNormalizer:
             scores = payload.get("scores", {})
             if not isinstance(scores, Mapping):
                 raise ValueError("Belief update scores must be a JSON object")
-            payload["scores"] = {normalize_player_id(key): float(value) for key, value in scores.items()}
+            payload["scores"] = {
+                normalize_player_id(key): float(value) for key, value in scores.items()
+            }
         elif model_class.__name__ in {"VoteAction", "MurderAction"}:
             payload["target_id"] = normalize_player_id(payload.get("target_id"))
 

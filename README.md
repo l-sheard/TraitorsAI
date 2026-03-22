@@ -206,17 +206,17 @@ results/experiment_1_baseline_behaviour/run_<id>/analysis/
 
 Primary result figures:
 
-- **`fig_1_win_rate_by_role`** — *Overall game outcome.*  
-  Bar chart showing the proportion of games won by Faithful agents vs Traitor agents.  
+- **`fig_1_win_rate_by_role`** — *Overall game outcome.*
+  Bar chart showing the proportion of games won by Faithful agents vs Traitor agents.
   The headline result: which side wins more often under baseline conditions.
 
-- **`fig_2_traitors_remaining_by_round`** — *Traitor survival over rounds.*  
+- **`fig_2_traitors_remaining_by_round`** — *Traitor survival over rounds.*
   Line chart of the mean percentage of each game's original traitors still alive
   at the start of each round. A high or slowly falling curve indicates traitors
   remain undetected for longer.
 
-- **`fig_3_voting_accuracy_by_round`** — *Detection improvement over time.*  
-  Line chart showing the fraction of banishment votes targeting an actual traitor each round.  
+- **`fig_3_voting_accuracy_by_round`** — *Detection improvement over time.*
+  Line chart showing the fraction of banishment votes targeting an actual traitor each round.
   An upward trend indicates agents increasingly identify traitors as the game progresses.
 
 Underlying data is exported to `tables/fig_1_win_rate_by_role.csv`, `tables/fig_2_traitors_remaining_by_round.csv`, and `tables/fig_3_voting_accuracy_by_round.csv`.
