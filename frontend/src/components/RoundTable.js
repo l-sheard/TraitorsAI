@@ -116,8 +116,13 @@ function RoundTable({ gameState, minHeight = '600px' }) {
             >
               <div className="relative">
                 <AgentAvatar player={player} />
-                <div className="absolute -bottom-6 left-1/2 whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-xs font-bold text-white transform -translate-x-1/2">
-                  P{player.id}
+                <div
+                  className="absolute -bottom-6 left-1/2 max-w-[9.5rem] whitespace-nowrap rounded bg-slate-800 px-2 py-1 text-xs font-bold text-white transform -translate-x-1/2"
+                  title={`P${player.id} - ${player.displayName || `Player ${player.id}`}`}
+                >
+                  <span className="truncate inline-block max-w-[9rem] align-bottom">
+                    P{player.id} · {player.displayName || `Player ${player.id}`}
+                  </span>
                 </div>
               </div>
               {hasVoteInfo && (

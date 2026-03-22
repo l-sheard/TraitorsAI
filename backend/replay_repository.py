@@ -8,8 +8,9 @@ from typing import Any, Dict, List, Tuple
 class ReplayRepository:
     """Small data access layer for replay summaries and event logs."""
 
-    def __init__(self, logs_dir: Path) -> None:
+    def __init__(self, logs_dir: Path, allowed_run_ids: List[str] | None = None) -> None:
         self.logs_dir = logs_dir
+        self.allowed_run_ids = set(allowed_run_ids or [])
 
     def list_games(self) -> List[Dict[str, Any]]:
         if not self.logs_dir.exists():
@@ -31,10 +32,14 @@ class ReplayRepository:
         run_root = self.logs_dir / "experiment_1_baseline_behaviour"
         if run_root.exists():
             for run_dir in sorted(run_root.glob("run_*"), reverse=True):
+                if self.allowed_run_ids and run_dir.name not in self.allowed_run_ids:
+                    continue
                 games_dir = run_dir / "games"
                 if not games_dir.exists():
                     continue
-                for game_dir in sorted((d for d in games_dir.iterdir() if d.is_dir()), reverse=True):
+                for game_dir in sorted(
+                    (d for d in games_dir.iterdir() if d.is_dir()), reverse=True
+                ):
                     summary_path = game_dir / "game_summary.json"
                     if not summary_path.exists():
                         continue
@@ -103,7 +108,9 @@ class ReplayRepository:
         # Run-directory replay id format: run_<id>::<game_id>
         if "::" in replay_id:
             run_id, game_id = self._split_replay_id(replay_id)
-            game_dir = self.logs_dir / "experiment_1_baseline_behaviour" / run_id / "games" / game_id
+            game_dir = (
+                self.logs_dir / "experiment_1_baseline_behaviour" / run_id / "games" / game_id
+            )
             return game_dir / "game_summary.json", game_dir / "events.jsonl"
 
         # Legacy flat logs format

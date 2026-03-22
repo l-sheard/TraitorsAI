@@ -12,6 +12,7 @@ from traitors_ai.analysis import (  # noqa: E402
     analyse_experiment_1,
     compute_agent_role_summary,
     compute_banishment_outcomes,
+    compute_faithful_banish_accuracy_by_persona,
     compute_overall_metrics,
     compute_round_summary,
     compute_suspicion_gap_over_time,
@@ -84,7 +85,7 @@ def _make_mock_run_dir(tmp_path: Path, include_persona: bool = True) -> Path:
                 "vote_entropy": 1.1,
                 "vote_majority_size": 4,
                 "deception_success_round": True,
-                    "banished_role": "faithful",
+                "banished_role": "faithful",
             },
             {
                 "game_id": "g1",
@@ -94,7 +95,7 @@ def _make_mock_run_dir(tmp_path: Path, include_persona: bool = True) -> Path:
                 "vote_entropy": 1.0,
                 "vote_majority_size": 5,
                 "deception_success_round": False,
-                    "banished_role": "traitor",
+                "banished_role": "traitor",
             },
             {
                 "game_id": "g2",
@@ -104,7 +105,7 @@ def _make_mock_run_dir(tmp_path: Path, include_persona: bool = True) -> Path:
                 "vote_entropy": 1.2,
                 "vote_majority_size": 4,
                 "deception_success_round": True,
-                    "banished_role": "faithful",
+                "banished_role": "faithful",
             },
         ]
     )
@@ -175,34 +176,126 @@ def _make_mock_run_dir(tmp_path: Path, include_persona: bool = True) -> Path:
 
     g1_summary = {
         "game_id": "g1",
-        "roles": {"1": "traitor", "2": "traitor", "3": "faithful", "4": "faithful", "5": "faithful"},
+        "roles": {
+            "1": "traitor",
+            "2": "traitor",
+            "3": "faithful",
+            "4": "faithful",
+            "5": "faithful",
+        },
+        "personas": {
+            "1": {"name": "Traitor A"},
+            "2": {"name": "Traitor B"},
+            "3": {"name": "Analyst"},
+            "4": {"name": "Strategist"},
+            "5": {"name": "Analyst"},
+        },
     }
     g2_summary = {
         "game_id": "g2",
-        "roles": {"1": "traitor", "2": "traitor", "3": "faithful", "4": "faithful", "5": "faithful"},
+        "roles": {
+            "1": "traitor",
+            "2": "traitor",
+            "3": "faithful",
+            "4": "faithful",
+            "5": "faithful",
+        },
+        "personas": {
+            "1": {"name": "Traitor A"},
+            "2": {"name": "Traitor B"},
+            "3": {"name": "Analyst"},
+            "4": {"name": "Strategist"},
+            "5": {"name": "Analyst"},
+        },
     }
     (games_dir / "g1" / "game_summary.json").write_text(json.dumps(g1_summary), encoding="utf-8")
     (games_dir / "g2" / "game_summary.json").write_text(json.dumps(g2_summary), encoding="utf-8")
 
     g1_events = [
-        {"action_type": "round_start", "round": 1, "payload": {"round": 1, "alive_count": 5, "traitors_alive": 2}},
-        {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 1}},
-        {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 3}},
-        {"action_type": "round_start", "round": 2, "payload": {"round": 2, "alive_count": 4, "traitors_alive": 1}},
-        {"action_type": "vote", "phase": "voting", "round": 2, "payload": {"target_id": 1}},
+        {
+            "action_type": "round_start",
+            "round": 1,
+            "payload": {"round": 1, "alive_count": 5, "traitors_alive": 2},
+        },
+        {
+            "action_type": "vote",
+            "phase": "voting",
+            "round": 1,
+            "actor_id": 3,
+            "payload": {"target_id": 1},
+        },
+        {
+            "action_type": "vote",
+            "phase": "voting",
+            "round": 1,
+            "actor_id": 4,
+            "payload": {"target_id": 3},
+        },
+        {
+            "action_type": "round_start",
+            "round": 2,
+            "payload": {"round": 2, "alive_count": 4, "traitors_alive": 1},
+        },
+        {
+            "action_type": "vote",
+            "phase": "voting",
+            "round": 2,
+            "actor_id": 5,
+            "payload": {"target_id": 1},
+        },
     ]
     g2_events = [
-        {"action_type": "round_start", "round": 1, "payload": {"round": 1, "alive_count": 5, "traitors_alive": 2}},
-        {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 2}},
-        {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 4}},
-        {"action_type": "round_start", "round": 2, "payload": {"round": 2, "alive_count": 4, "traitors_alive": 2}},
-        {"action_type": "vote", "phase": "voting", "round": 2, "payload": {"target_id": 3}},
-        {"action_type": "round_start", "round": 3, "payload": {"round": 3, "alive_count": 3, "traitors_alive": 1}},
-        {"action_type": "vote", "phase": "voting", "round": 3, "payload": {"target_id": 2}},
+        {
+            "action_type": "round_start",
+            "round": 1,
+            "payload": {"round": 1, "alive_count": 5, "traitors_alive": 2},
+        },
+        {
+            "action_type": "vote",
+            "phase": "voting",
+            "round": 1,
+            "actor_id": 3,
+            "payload": {"target_id": 2},
+        },
+        {
+            "action_type": "vote",
+            "phase": "voting",
+            "round": 1,
+            "actor_id": 4,
+            "payload": {"target_id": 4},
+        },
+        {
+            "action_type": "round_start",
+            "round": 2,
+            "payload": {"round": 2, "alive_count": 4, "traitors_alive": 2},
+        },
+        {
+            "action_type": "vote",
+            "phase": "voting",
+            "round": 2,
+            "actor_id": 5,
+            "payload": {"target_id": 3},
+        },
+        {
+            "action_type": "round_start",
+            "round": 3,
+            "payload": {"round": 3, "alive_count": 3, "traitors_alive": 1},
+        },
+        {
+            "action_type": "vote",
+            "phase": "voting",
+            "round": 3,
+            "actor_id": 3,
+            "payload": {"target_id": 2},
+        },
     ]
 
-    (games_dir / "g1" / "events.jsonl").write_text("\n".join(json.dumps(e) for e in g1_events) + "\n", encoding="utf-8")
-    (games_dir / "g2" / "events.jsonl").write_text("\n".join(json.dumps(e) for e in g2_events) + "\n", encoding="utf-8")
+    (games_dir / "g1" / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in g1_events) + "\n", encoding="utf-8"
+    )
+    (games_dir / "g2" / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in g2_events) + "\n", encoding="utf-8"
+    )
 
     return run_dir
 
@@ -233,7 +326,9 @@ def test_compute_overall_and_round_summary(tmp_path: Path) -> None:
     assert overall_df.at[0, "mean_rounds"] == pytest.approx(5.0)
     assert "mean_banishment_accuracy" in diss_1.columns
     assert "mean_suspicion_gap" in diss_2.columns
-    assert set(["round", "mean_suspicion_to_traitors", "average_vote_entropy"]).issubset(round_summary.columns)
+    assert set(["round", "mean_suspicion_to_traitors", "average_vote_entropy"]).issubset(
+        round_summary.columns
+    )
 
 
 def test_agent_summary_handles_missing_persona(tmp_path: Path) -> None:
@@ -263,19 +358,43 @@ def test_analyse_experiment_writes_outputs_and_figures(tmp_path: Path) -> None:
     assert (analysis_dir / "figures" / "fig_1_win_rate_by_role.png").exists()
     assert (analysis_dir / "figures" / "fig_2_traitors_remaining_by_round.png").exists()
     assert (analysis_dir / "figures" / "fig_3_voting_accuracy_by_round.png").exists()
+    assert (analysis_dir / "figures" / "fig_4_faithful_banish_accuracy_by_persona.png").exists()
     # Primary figure data tables
     assert (analysis_dir / "tables" / "fig_1_win_rate_by_role.csv").exists()
     assert (analysis_dir / "tables" / "fig_2_traitors_remaining_by_round.csv").exists()
     assert (analysis_dir / "tables" / "fig_3_voting_accuracy_by_round.csv").exists()
+    assert (analysis_dir / "tables" / "fig_4_faithful_banish_accuracy_by_persona.csv").exists()
 
 
 def test_compute_suspicion_gap_over_time() -> None:
-    per_round = pd.DataFrame([
-        {"game_id": "g1", "round": 1, "mean_suspicion_to_traitors": 0.6, "mean_suspicion_to_faithful": 0.4},
-        {"game_id": "g1", "round": 2, "mean_suspicion_to_traitors": 0.7, "mean_suspicion_to_faithful": 0.4},
-        {"game_id": "g2", "round": 1, "mean_suspicion_to_traitors": 0.5, "mean_suspicion_to_faithful": 0.45},
-        {"game_id": "g2", "round": 2, "mean_suspicion_to_traitors": 0.65, "mean_suspicion_to_faithful": 0.42},
-    ])
+    per_round = pd.DataFrame(
+        [
+            {
+                "game_id": "g1",
+                "round": 1,
+                "mean_suspicion_to_traitors": 0.6,
+                "mean_suspicion_to_faithful": 0.4,
+            },
+            {
+                "game_id": "g1",
+                "round": 2,
+                "mean_suspicion_to_traitors": 0.7,
+                "mean_suspicion_to_faithful": 0.4,
+            },
+            {
+                "game_id": "g2",
+                "round": 1,
+                "mean_suspicion_to_traitors": 0.5,
+                "mean_suspicion_to_faithful": 0.45,
+            },
+            {
+                "game_id": "g2",
+                "round": 2,
+                "mean_suspicion_to_traitors": 0.65,
+                "mean_suspicion_to_faithful": 0.42,
+            },
+        ]
+    )
     result = compute_suspicion_gap_over_time(per_round)
 
     assert list(result["round"]) == [1, 2]
@@ -290,13 +409,26 @@ def test_compute_traitor_vote_rate_by_round() -> None:
     game_events_data = [
         (
             [
-                {"action_type": "round_start", "round": 1, "payload": {"round": 1, "alive_count": 5, "traitors_alive": 1}},
+                {
+                    "action_type": "round_start",
+                    "round": 1,
+                    "payload": {"round": 1, "alive_count": 5, "traitors_alive": 1},
+                },
                 {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 2}},
                 {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 2}},
                 {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 3}},
                 {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 3}},
             ],
-            {"game_id": "g1", "roles": {"1": "faithful", "2": "traitor", "3": "faithful", "4": "faithful", "5": "faithful"}},
+            {
+                "game_id": "g1",
+                "roles": {
+                    "1": "faithful",
+                    "2": "traitor",
+                    "3": "faithful",
+                    "4": "faithful",
+                    "5": "faithful",
+                },
+            },
         )
     ]
     result = compute_traitor_vote_rate_by_round(game_events_data)
@@ -310,13 +442,15 @@ def test_compute_traitor_vote_rate_by_round() -> None:
 
 
 def test_compute_banishment_outcomes() -> None:
-    per_round = pd.DataFrame([
-        {"game_id": "g1", "round": 1, "banished_role": "faithful"},
-        {"game_id": "g1", "round": 2, "banished_role": "traitor"},
-        {"game_id": "g2", "round": 1, "banished_role": "faithful"},
-        {"game_id": "g2", "round": 2, "banished_role": "faithful"},
-        {"game_id": "g2", "round": 3, "banished_role": None},  # no banishment
-    ])
+    per_round = pd.DataFrame(
+        [
+            {"game_id": "g1", "round": 1, "banished_role": "faithful"},
+            {"game_id": "g1", "round": 2, "banished_role": "traitor"},
+            {"game_id": "g2", "round": 1, "banished_role": "faithful"},
+            {"game_id": "g2", "round": 2, "banished_role": "faithful"},
+            {"game_id": "g2", "round": 3, "banished_role": None},  # no banishment
+        ]
+    )
     result = compute_banishment_outcomes(per_round)
 
     assert set(result["role"]) == {"faithful", "traitor"}
@@ -329,21 +463,83 @@ def test_compute_banishment_outcomes() -> None:
 
 
 def test_new_primary_figures_created(tmp_path: Path) -> None:
-    """All three primary figures should be created from mock structured logs."""
+    """Primary figures should be created from mock structured logs."""
     run_dir = _make_mock_run_dir(tmp_path)
     result = analyse_experiment_1(run_dir=run_dir, dpi=72)
     figures = result["figures_created"]
-    assert "fig_1_win_rate_by_role" in figures
-    assert "fig_2_traitors_remaining_by_round" in figures
-    assert "fig_3_voting_accuracy_by_round" in figures
+    skipped = set(result.get("figures_skipped", {}).keys())
+    expected = {
+        "fig_1_win_rate_by_role",
+        "fig_2_traitors_remaining_by_round",
+        "fig_3_voting_accuracy_by_round",
+        "fig_4_faithful_banish_accuracy_by_persona",
+    }
+    for fig in expected:
+        assert fig in figures or fig in skipped
+
+
+def test_compute_faithful_banish_accuracy_by_persona() -> None:
+    game_events_data = [
+        (
+            [
+                {
+                    "action_type": "vote",
+                    "phase": "voting",
+                    "round": 1,
+                    "actor_id": 1,
+                    "payload": {"target_id": 2},
+                },
+                {
+                    "action_type": "vote",
+                    "phase": "voting",
+                    "round": 1,
+                    "actor_id": 2,
+                    "payload": {"target_id": 1},
+                },
+                {
+                    "action_type": "vote",
+                    "phase": "voting",
+                    "round": 1,
+                    "actor_id": 3,
+                    "payload": {"target_id": 1},
+                },
+                {
+                    "action_type": "vote",
+                    "phase": "revote",
+                    "round": 1,
+                    "actor_id": 1,
+                    "payload": {"target_id": 3},
+                },
+            ],
+            {
+                "game_id": "g1",
+                "roles": {"1": "faithful", "2": "traitor", "3": "faithful"},
+                "personas": {
+                    "1": {"name": "Calm Analyst"},
+                    "2": {"name": "Data-Driven Persuader"},
+                    "3": {"name": "Friendly Mediator"},
+                },
+            },
+        )
+    ]
+    result = compute_faithful_banish_accuracy_by_persona(game_events_data)
+    assert set(result["persona_name"]) == {"Calm Analyst", "Friendly Mediator"}
+
+    calm = result[result["persona_name"] == "Calm Analyst"].iloc[0]
+    # Calm Analyst cast two banish votes, one correct (targeted traitor), one incorrect.
+    assert int(calm["total_banish_votes"]) == 2
+    assert int(calm["correct_votes_for_traitor"]) == 1
+    assert calm["faithful_banish_vote_accuracy_percent"] == pytest.approx(50.0)
 
 
 def test_compute_win_rate_by_role() -> None:
-    per_game = pd.DataFrame([
-        {"game_id": "g1", "winner": "faithful"},
-        {"game_id": "g2", "winner": "traitors"},
-        {"game_id": "g3", "winner": "traitors"},
-    ])
+    per_game = pd.DataFrame(
+        [
+            {"game_id": "g1", "winner": "faithful"},
+            {"game_id": "g2", "winner": "traitors"},
+            {"game_id": "g3", "winner": "traitors"},
+        ]
+    )
     result = compute_win_rate_by_role(per_game)
     assert set(result["role"]) == {"Faithful", "Traitors"}
     faithful_row = result[result["role"] == "Faithful"].iloc[0]
@@ -357,10 +553,12 @@ def test_compute_win_rate_by_role() -> None:
 
 def test_compute_win_rate_by_role_fallback_columns() -> None:
     """Falls back to faithful_win / traitor_win boolean columns."""
-    per_game = pd.DataFrame([
-        {"game_id": "g1", "faithful_win": 1, "traitor_win": 0},
-        {"game_id": "g2", "faithful_win": 0, "traitor_win": 1},
-    ])
+    per_game = pd.DataFrame(
+        [
+            {"game_id": "g1", "faithful_win": 1, "traitor_win": 0},
+            {"game_id": "g2", "faithful_win": 0, "traitor_win": 1},
+        ]
+    )
     result = compute_win_rate_by_role(per_game)
     assert result[result["role"] == "Faithful"].iloc[0]["win_rate"] == pytest.approx(0.5)
     assert result[result["role"] == "Traitors"].iloc[0]["win_rate"] == pytest.approx(0.5)
@@ -370,13 +568,26 @@ def test_compute_voting_accuracy_by_round() -> None:
     game_events_data = [
         (
             [
-                {"action_type": "round_start", "round": 1, "payload": {"round": 1, "alive_count": 5, "traitors_alive": 1}},
+                {
+                    "action_type": "round_start",
+                    "round": 1,
+                    "payload": {"round": 1, "alive_count": 5, "traitors_alive": 1},
+                },
                 {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 2}},
                 {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 2}},
                 {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 3}},
                 {"action_type": "vote", "phase": "voting", "round": 1, "payload": {"target_id": 3}},
             ],
-            {"game_id": "g1", "roles": {"1": "faithful", "2": "traitor", "3": "faithful", "4": "faithful", "5": "faithful"}},
+            {
+                "game_id": "g1",
+                "roles": {
+                    "1": "faithful",
+                    "2": "traitor",
+                    "3": "faithful",
+                    "4": "faithful",
+                    "5": "faithful",
+                },
+            },
         )
     ]
     result = compute_voting_accuracy_by_round(game_events_data)
@@ -417,40 +628,82 @@ def test_compute_traitor_remaining_by_round_single_game() -> None:
     game_events_data = [
         (
             [
-                {"action_type": "round_start", "round": 1, "payload": {"round": 1, "traitors_alive": 2}},
-                {"action_type": "round_start", "round": 2, "payload": {"round": 2, "traitors_alive": 2}},
-                {"action_type": "round_start", "round": 3, "payload": {"round": 3, "traitors_alive": 1}},
+                {
+                    "action_type": "round_start",
+                    "round": 1,
+                    "payload": {"round": 1, "traitors_alive": 2},
+                },
+                {
+                    "action_type": "round_start",
+                    "round": 2,
+                    "payload": {"round": 2, "traitors_alive": 2},
+                },
+                {
+                    "action_type": "round_start",
+                    "round": 3,
+                    "payload": {"round": 3, "traitors_alive": 1},
+                },
             ],
             {"game_id": "gA", "roles": {"1": "traitor", "2": "traitor", "3": "faithful"}},
         )
     ]
     result = compute_traitor_remaining_by_round(game_events_data)
     assert list(result["round"]) == [1, 2, 3]
-    assert result.loc[result["round"] == 1, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(1.0)
-    assert result.loc[result["round"] == 3, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(0.5)
+    assert result.loc[result["round"] == 1, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(
+        1.0
+    )
+    assert result.loc[result["round"] == 3, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(
+        0.5
+    )
 
 
 def test_compute_traitor_remaining_by_round_aggregates_lengths() -> None:
     game_events_data = [
         (
             [
-                {"action_type": "round_start", "round": 1, "payload": {"round": 1, "traitors_alive": 2}},
-                {"action_type": "round_start", "round": 2, "payload": {"round": 2, "traitors_alive": 2}},
-                {"action_type": "round_start", "round": 3, "payload": {"round": 3, "traitors_alive": 1}},
+                {
+                    "action_type": "round_start",
+                    "round": 1,
+                    "payload": {"round": 1, "traitors_alive": 2},
+                },
+                {
+                    "action_type": "round_start",
+                    "round": 2,
+                    "payload": {"round": 2, "traitors_alive": 2},
+                },
+                {
+                    "action_type": "round_start",
+                    "round": 3,
+                    "payload": {"round": 3, "traitors_alive": 1},
+                },
             ],
             {"game_id": "gA", "roles": {"1": "traitor", "2": "traitor", "3": "faithful"}},
         ),
         (
             [
-                {"action_type": "round_start", "round": 1, "payload": {"round": 1, "traitors_alive": 2}},
-                {"action_type": "round_start", "round": 2, "payload": {"round": 2, "traitors_alive": 1}},
+                {
+                    "action_type": "round_start",
+                    "round": 1,
+                    "payload": {"round": 1, "traitors_alive": 2},
+                },
+                {
+                    "action_type": "round_start",
+                    "round": 2,
+                    "payload": {"round": 2, "traitors_alive": 1},
+                },
             ],
             {"game_id": "gB", "roles": {"1": "traitor", "2": "traitor", "3": "faithful"}},
         ),
     ]
     result = compute_traitor_remaining_by_round(game_events_data)
     # Expected: round1=1.0, round2=(1.0+0.5)/2=0.75, round3=0.5 (only game A contributes)
-    assert result.loc[result["round"] == 1, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(1.0)
-    assert result.loc[result["round"] == 2, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(0.75)
-    assert result.loc[result["round"] == 3, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(0.5)
+    assert result.loc[result["round"] == 1, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(
+        1.0
+    )
+    assert result.loc[result["round"] == 2, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(
+        0.75
+    )
+    assert result.loc[result["round"] == 3, "mean_traitor_remaining_rate"].iloc[0] == pytest.approx(
+        0.5
+    )
     assert int(result.loc[result["round"] == 3, "contributing_games"].iloc[0]) == 1

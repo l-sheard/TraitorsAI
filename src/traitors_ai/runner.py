@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import random
@@ -30,6 +30,52 @@ from .schemas import (
 )
 
 app = typer.Typer(add_completion=False)
+
+
+DEFAULT_TEST_RUNS_OUTDIR = "results/test_runs"
+
+_ALIAS_POOL = [
+    "Alice",
+    "Bob",
+    "Charlie",
+    "Diana",
+    "Ethan",
+    "Fiona",
+    "George",
+    "Hannah",
+    "Isaac",
+    "Julia",
+    "Kevin",
+    "Lila",
+    "Mason",
+    "Nora",
+    "Owen",
+    "Priya",
+    "Quinn",
+    "Ruby",
+    "Sam",
+    "Tara",
+    "Uma",
+    "Victor",
+    "Willa",
+    "Xander",
+    "Yasmin",
+    "Zane",
+    "Ava",
+    "Ben",
+    "Clara",
+    "Daniel",
+    "Elena",
+    "Felix",
+    "Grace",
+    "Henry",
+    "Ivy",
+    "Jonah",
+    "Kira",
+    "Leo",
+    "Mia",
+    "Noah",
+]
 
 # ---------------------------------------------------------------------------
 # Experiment 1 constants
@@ -72,9 +118,7 @@ def _init_game_state(config: GameConfig) -> GameState:
     agent_states = {
         pid: AgentPrivateState(
             memory_summary="",
-            suspicion_scores={
-                other: 0.5 for other in alive if other != pid
-            },
+            suspicion_scores={other: 0.5 for other in alive if other != pid},
         )
         for pid in alive
     }
@@ -93,7 +137,20 @@ def _init_game_state(config: GameConfig) -> GameState:
     )
 
 
-def _build_agents(config: GameConfig, state: GameState) -> Tuple[Dict[int, TraitorsAgent], Dict[int, Dict[str, object]]]:
+def _player_aliases_for_seed(seed: int, player_ids: List[int]) -> Dict[int, str]:
+    rng = random.Random(seed)
+    pool = _ALIAS_POOL.copy()
+    rng.shuffle(pool)
+    aliases: Dict[int, str] = {}
+    ordered_ids = sorted(player_ids)
+    for idx, pid in enumerate(ordered_ids):
+        aliases[pid] = pool[idx] if idx < len(pool) else f"Player{idx + 1}"
+    return aliases
+
+
+def _build_agents(
+    config: GameConfig, state: GameState
+) -> Tuple[Dict[int, TraitorsAgent], Dict[int, Dict[str, object]]]:
     rng = random.Random(config.seed)
     persona_cards = assign_personas(config.n_players, rng)
     llm = create_llm(config.model_name, config.temperature)
@@ -171,15 +228,21 @@ def _run_single_game(config: GameConfig, outdir: str) -> GameState:
     log_dir = Path(outdir) / "logs"
     logger = JsonlLogger(str(log_dir), state.game_id)
     agents, personas_by_player = _build_agents(config, state)
+    player_aliases = _player_aliases_for_seed(config.seed, list(state.roles.keys()))
     _log_game_setup(logger, state, personas_by_player)
     graph = build_graph(agents, logger)
     final_state = _coerce_final_state(graph.invoke(state))
     logger.write_summary(
         final_state,
-        extra={"personas": personas_by_player},
+        extra={
+            "personas": personas_by_player,
+            "player_aliases": {str(k): v for k, v in player_aliases.items()},
+        },
     )
     logger.close()
-    typer.echo(f"\n\u2705 Game complete! Winner: {final_state.winner} after {final_state.round_idx} rounds")
+    typer.echo(
+        f"\n\u2705 Game complete! Winner: {final_state.winner} after {final_state.round_idx} rounds"
+    )
     typer.echo(f"   Logs: {log_dir / f'{state.game_id}.jsonl'}\n")
     return final_state
 
@@ -204,6 +267,7 @@ def _run_experiment_1_game(
 
     logger = output_manager.game_logger(game_id, config.model_name)
     agents, personas_by_player = _build_agents(config, state)
+    player_aliases = _player_aliases_for_seed(config.seed, list(state.roles.keys()))
     _log_game_setup(logger, state, personas_by_player)
 
     try:
@@ -222,7 +286,9 @@ def _run_experiment_1_game(
 
     # Build the rich game summary
     traitors_list = sorted(final_state.traitors)
-    faithful_list = sorted({pid for pid in final_state.roles if final_state.roles[pid].value == "faithful"})
+    faithful_list = sorted(
+        {pid for pid in final_state.roles if final_state.roles[pid].value == "faithful"}
+    )
     final_alive = sorted(final_state.alive)
     final_traitors_alive = sorted(final_state.alive & final_state.traitors)
     final_faithful_alive = sorted(final_state.alive - final_state.traitors)
@@ -238,6 +304,7 @@ def _run_experiment_1_game(
         "model_name": config.model_name,
         "temperature": config.temperature,
         "personas": {str(k): v for k, v in personas_by_player.items()},
+        "player_aliases": {str(k): v for k, v in player_aliases.items()},
         "roles": {str(pid): role.value for pid, role in final_state.roles.items()},
         "winner": final_state.winner,
         "faithful_win": final_state.winner == "faithful",
@@ -260,11 +327,9 @@ def _run_experiment_1_game(
     game_metrics = compute_game_metrics(events, rich_summary_base)
     rich_summary_base.update(game_metrics)
 
-    rich_summary = RichGameSummary(**{
-        k: rich_summary_base[k]
-        for k in RichGameSummary.model_fields
-        if k in rich_summary_base
-    })
+    rich_summary = RichGameSummary(
+        **{k: rich_summary_base[k] for k in RichGameSummary.model_fields if k in rich_summary_base}
+    )
     logger.write_rich_summary(rich_summary)
     logger.close()
 
@@ -286,8 +351,9 @@ def run_one(
     n_players: int = typer.Option(9, help="Number of players"),
     n_traitors: int = typer.Option(2, help="Number of traitors"),
     discussion_turns: int = typer.Option(1, help="Discussion turns per round"),
+    traitor_chat_turns: int = typer.Option(2, help="Traitor private-chat turns per round"),
     max_rounds: int = typer.Option(30, help="Maximum rounds"),
-    outdir: str = typer.Option("results", help="Output directory"),
+    outdir: str = typer.Option(DEFAULT_TEST_RUNS_OUTDIR, help="Output directory"),
 ) -> None:
     load_env()
     config = GameConfig(
@@ -298,14 +364,19 @@ def run_one(
         n_players=n_players,
         n_traitors=n_traitors,
         discussion_turns=discussion_turns,
+        traitor_chat_turns=traitor_chat_turns,
         max_rounds=max_rounds,
     )
     state = _run_single_game(config, outdir)
-    typer.echo(json.dumps({
-        "game_id": state.game_id,
-        "winner": state.winner,
-        "rounds": state.round_idx,
-    }))
+    typer.echo(
+        json.dumps(
+            {
+                "game_id": state.game_id,
+                "winner": state.winner,
+                "rounds": state.round_idx,
+            }
+        )
+    )
 
 
 @app.command("run-batch")
@@ -317,8 +388,9 @@ def run_batch(
     n_players: int = typer.Option(9, help="Number of players"),
     n_traitors: int = typer.Option(2, help="Number of traitors"),
     discussion_turns: int = typer.Option(1, help="Discussion turns per round"),
+    traitor_chat_turns: int = typer.Option(2, help="Traitor private-chat turns per round"),
     max_rounds: int = typer.Option(30, help="Maximum rounds"),
-    outdir: str = typer.Option("results", help="Output directory"),
+    outdir: str = typer.Option(DEFAULT_TEST_RUNS_OUTDIR, help="Output directory"),
 ) -> None:
     load_env()
     output_dir = Path(outdir)
@@ -333,6 +405,7 @@ def run_batch(
             n_players=n_players,
             n_traitors=n_traitors,
             discussion_turns=discussion_turns,
+            traitor_chat_turns=traitor_chat_turns,
             max_rounds=max_rounds,
         )
         state = _run_single_game(config, outdir)
@@ -376,8 +449,10 @@ def experiment_1_run_one(
     n_players: int = typer.Option(9, help="Number of players"),
     n_traitors: int = typer.Option(2, help="Number of traitors"),
     discussion_turns: int = typer.Option(1, help="Discussion turns per round"),
+    traitor_chat_turns: int = typer.Option(2, help="Traitor private-chat turns per round"),
     max_rounds: int = typer.Option(30, help="Maximum rounds"),
-    outdir: str = typer.Option("results", help="Base output directory"),
+    message_char_limit: int = typer.Option(400, help="Max chars for each public message"),
+    outdir: str = typer.Option(DEFAULT_TEST_RUNS_OUTDIR, help="Base output directory"),
 ) -> None:
     """Run a single Experiment 1 baseline_memory game."""
     load_env()
@@ -389,7 +464,9 @@ def experiment_1_run_one(
         n_players=n_players,
         n_traitors=n_traitors,
         discussion_turns=discussion_turns,
+        traitor_chat_turns=traitor_chat_turns,
         max_rounds=max_rounds,
+        message_char_limit=message_char_limit,
     )
     run_id = ExperimentOutputManager.make_run_id()
     output_manager = ExperimentOutputManager(outdir, run_id)
@@ -436,8 +513,10 @@ def experiment_1_run_batch(
     n_players: int = typer.Option(9, help="Number of players"),
     n_traitors: int = typer.Option(2, help="Number of traitors"),
     discussion_turns: int = typer.Option(1, help="Discussion turns per round"),
+    traitor_chat_turns: int = typer.Option(2, help="Traitor private-chat turns per round"),
     max_rounds: int = typer.Option(30, help="Maximum rounds"),
-    outdir: str = typer.Option("results", help="Base output directory"),
+    message_char_limit: int = typer.Option(400, help="Max chars for each public message"),
+    outdir: str = typer.Option(DEFAULT_TEST_RUNS_OUTDIR, help="Base output directory"),
     fail_fast: bool = typer.Option(False, "--fail-fast", help="Abort on first game failure"),
 ) -> None:
     """Run a batch of Experiment 1 baseline_memory games across many seeds."""
@@ -454,7 +533,9 @@ def experiment_1_run_batch(
         n_players=n_players,
         n_traitors=n_traitors,
         discussion_turns=discussion_turns,
+        traitor_chat_turns=traitor_chat_turns,
         max_rounds=max_rounds,
+        message_char_limit=message_char_limit,
     )
     manifest = ExperimentManifest(
         experiment_name=EXPERIMENT_NAME,
@@ -487,7 +568,9 @@ def experiment_1_run_batch(
             n_players=n_players,
             n_traitors=n_traitors,
             discussion_turns=discussion_turns,
+            traitor_chat_turns=traitor_chat_turns,
             max_rounds=max_rounds,
+            message_char_limit=message_char_limit,
         )
         result = _run_experiment_1_game(config, output_manager)
         if result is None:
@@ -526,7 +609,9 @@ def experiment_1_run_batch(
 # ---------------------------------------------------------------------------
 
 
-def _rebuild_csvs_from_games_dir(games_dir: Path, run_id: str, output_manager: ExperimentOutputManager) -> int:
+def _rebuild_csvs_from_games_dir(
+    games_dir: Path, run_id: str, output_manager: ExperimentOutputManager
+) -> int:
     """Scan games_dir for saved game files and rebuild all experiment CSVs.
 
     Returns the number of games successfully processed.
@@ -575,7 +660,10 @@ def _rebuild_csvs_from_games_dir(games_dir: Path, run_id: str, output_manager: E
 
 @app.command("rebuild-experiment-1-csvs")
 def rebuild_experiment_1_csvs(
-    run_dir: str = typer.Argument(..., help="Path to the run directory (e.g. results/experiment_1_baseline_behaviour/run_<id>)"),
+    run_dir: str = typer.Argument(
+        ...,
+        help="Path to the run directory (e.g. results/experiment_1_baseline_behaviour/run_<id>)",
+    ),
 ) -> None:
     """Rebuild all experiment CSVs from saved game files in a (possibly partial) run directory.
 
@@ -605,7 +693,9 @@ def rebuild_experiment_1_csvs(
         typer.echo("\n\u274c No valid game files found. Nothing written.")
         raise typer.Exit(code=1)
 
-    typer.echo(f"\n\u2705 Rebuilt CSVs from {n} game(s). Run the analysis pipeline to generate graphs:")
+    typer.echo(
+        f"\n\u2705 Rebuilt CSVs from {n} game(s). Run the analysis pipeline to generate graphs:"
+    )
     typer.echo(f"   python -m traitors_ai.analysis analyse-experiment-1 --run-dir {run_path}")
 
 
@@ -638,6 +728,7 @@ def _write_experiment_outputs(
         if not events_path.exists() or not summary_path.exists():
             continue
         import json as _json
+
         events = []
         with events_path.open("r", encoding="utf-8") as f:
             for line in f:

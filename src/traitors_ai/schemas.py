@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import random
 from datetime import datetime
@@ -13,6 +13,7 @@ class GameConfig(BaseModel):
     n_traitors: int = 2
     max_rounds: int = 30
     discussion_turns: int = 1
+    traitor_chat_turns: int = 2
     message_char_limit: int = 400
     seed: int
     model_name: str = "gpt-4o-mini"
@@ -30,6 +31,8 @@ class GameConfig(BaseModel):
             raise ValueError("Number of traitors must be smaller than number of players")
         if self.discussion_turns < 1:
             raise ValueError("Discussion turns must be at least 1")
+        if self.traitor_chat_turns < 1:
+            raise ValueError("Traitor chat turns must be at least 1")
         if self.max_rounds < 1:
             raise ValueError("Max rounds must be at least 1")
         if self.message_char_limit < 50:
@@ -44,7 +47,7 @@ class Role(str, Enum):
 
 class VoteAction(BaseModel):
     target_id: int
-    rationale: str = Field(max_length=200)
+    rationale: str = Field(max_length=320)
 
 
 class MurderAction(BaseModel):
@@ -82,6 +85,7 @@ class EventLogRow(BaseModel):
 
 class AgentPrivateState(BaseModel):
     memory_summary: str = ""
+    current_strategy_plan: str = ""
     round_summaries: List[str] = Field(default_factory=list)
     player_notes: Dict[int, str] = Field(default_factory=dict)
     last_public_messages: Dict[int, str] = Field(default_factory=dict)
@@ -150,6 +154,7 @@ class GameSummary(BaseModel):
     config: GameConfig
     roles: Dict[int, Role] = Field(default_factory=dict)
     personas: Dict[int, Dict[str, Any]] = Field(default_factory=dict)
+    player_aliases: Dict[str, str] = Field(default_factory=dict)
 
 
 class RichGameSummary(BaseModel):
@@ -163,6 +168,7 @@ class RichGameSummary(BaseModel):
     model_name: str
     temperature: float
     personas: Dict[str, Any] = Field(default_factory=dict)
+    player_aliases: Dict[str, str] = Field(default_factory=dict)
     roles: Dict[str, str] = Field(default_factory=dict)
     winner: Optional[str]
     faithful_win: bool

@@ -156,11 +156,13 @@ function GameViewer({ gameId, onBack }) {
             <PlayerSpeechPanel
               events={replaySnapshot.events}
               currentRound={replaySnapshot.round}
+              summary={summary}
               maxHeight="260px"
             />
             <TraitorChatPanel
               events={replaySnapshot.events}
               currentRound={replaySnapshot.round}
+              summary={summary}
               maxHeight="260px"
             />
           </div>

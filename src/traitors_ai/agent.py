@@ -13,8 +13,16 @@ from .schemas import AgentPrivateState, BeliefUpdate, MurderAction, PublicMessag
 
 
 _PLAYER_REF_PATTERN = re.compile(r"\bP\d+\b")
-_ACCUSATION_PATTERN = re.compile(r"\b(suspect|suspicious|traitor|lying|liar|untrustworthy)\b", re.IGNORECASE)
-_DEFENCE_PATTERN = re.compile(r"\b(trust|innocent|faithful|defend|clear|vouch)\b|agree with", re.IGNORECASE)
+_ACCUSATION_PATTERN = re.compile(
+    r"\b(suspect|suspicious|traitor|lying|liar|untrustworthy)\b", re.IGNORECASE
+)
+_DEFENCE_PATTERN = re.compile(
+    r"\b(trust|innocent|faithful|defend|clear|vouch)\b|agree with", re.IGNORECASE
+)
+
+
+class LLMInvocationError(RuntimeError):
+    """Raised when an LLM call still fails after a single retry."""
 
 
 class TraitorsAgent:
@@ -33,10 +41,16 @@ class TraitorsAgent:
         self.config = config
 
     def _invoke(self, prompt: str) -> str:
-        response = self.llm.invoke(prompt)
-        if isinstance(response, AIMessage):
-            return response.content
-        return str(response)
+        last_exc: Optional[Exception] = None
+        for _ in range(2):
+            try:
+                response = self.llm.invoke(prompt)
+                if isinstance(response, AIMessage):
+                    return response.content
+                return str(response)
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+        raise LLMInvocationError(f"llm_invoke_failed_after_retry: {last_exc}")
 
     def _structured_invoke(
         self,
@@ -47,7 +61,10 @@ class TraitorsAgent:
     ) -> Tuple[Optional[BaseModel], Optional[str]]:
         last_error: Optional[str] = None
         for attempt in range(retries + 1):
-            raw = self._invoke(prompt)
+            try:
+                raw = self._invoke(prompt)
+            except LLMInvocationError as exc:
+                return None, str(exc)
             try:
                 return parser.parse(raw), None
             except Exception as exc:  # noqa: BLE001
@@ -62,13 +79,17 @@ class TraitorsAgent:
                 )
         return None, last_error
 
-    def _top_suspicions(self, state: AgentPrivateState, player_names: Optional[Dict[int, str]] = None) -> str:
+    def _top_suspicions(
+        self, state: AgentPrivateState, player_names: Optional[Dict[int, str]] = None
+    ) -> str:
         if not state.suspicion_scores:
             return "none"
         ordered = sorted(state.suspicion_scores.items(), key=lambda kv: kv[1], reverse=True)
         top = ordered[:3]
+
         def name(pid: int) -> str:
             return player_names.get(pid, f"P{pid}") if player_names else f"P{pid}"
+
         return ", ".join([f"{name(pid)}:{score:.2f}" for pid, score in top])
 
     def _alive_names(self, alive: List[int], player_names: Dict[int, str], rng=None) -> List[str]:
@@ -77,6 +98,15 @@ class TraitorsAgent:
             rng.shuffle(ordered)
         return [player_names[pid] for pid in ordered]
 
+    def _fellow_traitor_names_from_view(self, view: Dict[str, object]) -> List[str]:
+        if self.role != Role.traitor.value:
+            return []
+        traitor_ids = view.get("traitor_ids", [])
+        player_names = view.get("player_names", {})
+        if not isinstance(traitor_ids, list):
+            return []
+        return [player_names.get(pid, f"P{pid}") for pid in traitor_ids if pid != self.id]
+
     def _clip_text(self, text: str, limit: int = 120) -> str:
         compact = " ".join(text.split())
         if len(compact) <= limit:
@@ -84,7 +114,9 @@ class TraitorsAgent:
         return compact[: limit - 3].rstrip() + "..."
 
     def _extract_message_tags(self, content: str, speaker_id: int) -> str:
-        mentioned_players = [token for token in _PLAYER_REF_PATTERN.findall(content) if token != f"P{speaker_id}"]
+        mentioned_players = [
+            token for token in _PLAYER_REF_PATTERN.findall(content) if token != f"P{speaker_id}"
+        ]
         tags: List[str] = []
         if mentioned_players and _ACCUSATION_PATTERN.search(content):
             tags.append("accuses " + ", ".join(mentioned_players[:2]))
@@ -103,8 +135,13 @@ class TraitorsAgent:
 
         sections: List[str] = []
 
+        if state.current_strategy_plan:
+            sections.append(
+                "Current strategy: " + self._clip_text(state.current_strategy_plan, limit=320)
+            )
+
         if state.round_summaries:
-            sections.append("Recent rounds: " + " | ".join(state.round_summaries[-3:]))
+            sections.append("Recent rounds: " + " | ".join(state.round_summaries[-6:]))
 
         player_lines: List[str] = []
         for pid in alive_ids:
@@ -119,19 +156,20 @@ class TraitorsAgent:
             if parts:
                 player_lines.append(f"{name(pid)}: " + "; ".join(parts))
         if player_lines:
-            sections.append("Player notes: " + " | ".join(player_lines[:6]))
+            sections.append("Player notes: " + " | ".join(player_lines[:10]))
 
         if state.elimination_memory:
-            sections.append("Eliminations: " + " | ".join(state.elimination_memory[-4:]))
+            sections.append("Eliminations: " + " | ".join(state.elimination_memory[-8:]))
 
         if not sections:
             return "No useful memory yet."
 
         summary = " || ".join(sections)
-        return self._clip_text(summary, limit=1400)
+        return self._clip_text(summary, limit=2800)
 
     def update_beliefs(self, view: Dict[str, object]) -> Tuple[BeliefUpdate, Optional[str]]:
         parser = PydanticOutputParser(pydantic_object=BeliefUpdate)
+        fellow_traitor_names = self._fellow_traitor_names_from_view(view)
         prompt = prompts.belief_update_prompt(
             persona_card=prompts.format_persona(self.persona),
             role=self.role,
@@ -142,6 +180,8 @@ class TraitorsAgent:
             top_suspicions=view["top_suspicions"],
             format_instructions=parser.get_format_instructions(),
             name_to_id=view.get("name_to_id", ""),
+            self_name=view.get("self_name", ""),
+            fellow_traitor_names=fellow_traitor_names,
         )
         result, error = self._structured_invoke(prompt, parser, BeliefUpdate)
         if result is None:
@@ -150,6 +190,7 @@ class TraitorsAgent:
         return result, error
 
     def speak(self, view: Dict[str, object]) -> str:
+        fellow_traitor_names = self._fellow_traitor_names_from_view(view)
         prompt = prompts.public_discussion_prompt(
             persona_card=prompts.format_persona(self.persona),
             role=self.role,
@@ -159,8 +200,13 @@ class TraitorsAgent:
             memory_summary=view["memory_summary"],
             top_suspicions=view["top_suspicions"],
             message_char_limit=self.config.message_char_limit,
+            self_name=view.get("self_name", ""),
+            fellow_traitor_names=fellow_traitor_names,
         )
-        text = self._invoke(prompt).strip()
+        try:
+            text = self._invoke(prompt).strip()
+        except LLMInvocationError:
+            return "I need a moment to think."
         if len(text) > self.config.message_char_limit:
             return text[: self.config.message_char_limit].rstrip()
         return text
@@ -169,8 +215,11 @@ class TraitorsAgent:
         parser = PydanticOutputParser(pydantic_object=VoteAction)
         allowed_targets = view.get("allowed_targets", [])
         player_names = view.get("player_names", {})
+        fellow_traitor_names = self._fellow_traitor_names_from_view(view)
+
         def pname(pid: int) -> str:
             return player_names.get(pid, f"P{pid}") if player_names else f"P{pid}"
+
         allowed_text = ", ".join([pname(pid) for pid in allowed_targets]) if allowed_targets else ""
         prompt = prompts.vote_prompt(
             persona_card=prompts.format_persona(self.persona),
@@ -183,6 +232,8 @@ class TraitorsAgent:
             format_instructions=parser.get_format_instructions(),
             allowed_targets=allowed_text,
             name_to_id=view.get("name_to_id", ""),
+            self_name=view.get("self_name", ""),
+            fellow_traitor_names=fellow_traitor_names,
         )
         result, error = self._structured_invoke(prompt, parser, VoteAction)
         if result is None:
@@ -197,7 +248,7 @@ class TraitorsAgent:
     def traitor_chat(self, view: Dict[str, object]) -> str:
         player_names = view.get("player_names", {})
         traitor_names = [
-            player_names.get(pid, f"P{pid}") for pid in view["traitor_ids"]
+            player_names.get(pid, f"P{pid}") for pid in view["traitor_ids"] if pid != self.id
         ]
         prompt = prompts.traitor_chat_prompt(
             persona_card=prompts.format_persona(self.persona),
@@ -209,8 +260,15 @@ class TraitorsAgent:
             top_suspicions=view["top_suspicions"],
             traitor_names=traitor_names,
             traitor_summary=view.get("traitor_summary", ""),
+            message_char_limit=self.config.message_char_limit,
+            chat_turn=int(view.get("traitor_chat_turn", 1)),
+            self_name=view.get("self_name", ""),
+            fellow_traitor_names=traitor_names,
         )
-        text = self._invoke(prompt).strip()
+        try:
+            text = self._invoke(prompt).strip()
+        except LLMInvocationError:
+            return "Hold steady."
         if len(text) > self.config.message_char_limit:
             return text[: self.config.message_char_limit].rstrip()
         return text
@@ -219,7 +277,7 @@ class TraitorsAgent:
         parser = PydanticOutputParser(pydantic_object=MurderAction)
         player_names = view.get("player_names", {})
         traitor_names = [
-            player_names.get(pid, f"P{pid}") for pid in view["traitor_ids"]
+            player_names.get(pid, f"P{pid}") for pid in view["traitor_ids"] if pid != self.id
         ]
         prompt = prompts.murder_prompt(
             persona_card=prompts.format_persona(self.persona),
@@ -233,6 +291,8 @@ class TraitorsAgent:
             traitor_summary=view.get("traitor_summary", ""),
             format_instructions=parser.get_format_instructions(),
             name_to_id=view.get("name_to_id", ""),
+            self_name=view.get("self_name", ""),
+            fellow_traitor_names=traitor_names,
         )
         result, error = self._structured_invoke(prompt, parser, MurderAction)
         if result is None:
@@ -258,6 +318,7 @@ class TraitorsAgent:
     ) -> None:
         if self.config.condition_name == "no_memory":
             state.memory_summary = ""
+            state.current_strategy_plan = ""
             state.round_summaries = []
             state.player_notes = {}
             state.last_public_messages = {}
@@ -276,7 +337,7 @@ class TraitorsAgent:
             latest_by_speaker[message.speaker_id] = message
 
         for speaker_id, message in latest_by_speaker.items():
-            clipped = self._clip_text(message.content, limit=100)
+            clipped = self._clip_text(message.content, limit=140)
             state.last_public_messages[speaker_id] = clipped
             tag = self._extract_message_tags(message.content, speaker_id)
             if tag:
@@ -289,33 +350,55 @@ class TraitorsAgent:
             for voter_id, target_id in vote_record.items():
                 history = state.vote_memory.setdefault(voter_id, [])
                 history.append(target_id)
-                state.vote_memory[voter_id] = history[-3:]
+                state.vote_memory[voter_id] = history[-6:]
                 if voter_id != self.id:
                     existing = state.player_notes.get(voter_id, "")
                     vote_note = f"voted {name(target_id)}"
-                    state.player_notes[voter_id] = (existing + "; " + vote_note).strip("; ") if existing else vote_note
+                    state.player_notes[voter_id] = (
+                        (existing + "; " + vote_note).strip("; ") if existing else vote_note
+                    )
             round_parts.append(
-                "votes " + ", ".join([f"{name(voter)}->{name(target)}" for voter, target in sorted(vote_record.items())])
+                "votes "
+                + ", ".join(
+                    [
+                        f"{name(voter)}->{name(target)}"
+                        for voter, target in sorted(vote_record.items())
+                    ]
+                )
             )
 
         if banished_player is not None:
-            banished_role = roles.get(banished_player).value if roles and banished_player in roles else "unknown"
-            state.elimination_memory.append(f"R{round_idx}: banished {name(banished_player)} ({banished_role})")
+            banished_role = (
+                roles.get(banished_player).value
+                if roles and banished_player in roles
+                else "unknown"
+            )
+            state.elimination_memory.append(
+                f"R{round_idx}: banished {name(banished_player)} ({banished_role})"
+            )
             round_parts.append(f"banished {name(banished_player)}")
 
         if murdered_player is not None:
-            murdered_role = roles.get(murdered_player).value if roles and murdered_player in roles else "unknown"
-            state.elimination_memory.append(f"R{round_idx}: murdered {name(murdered_player)} ({murdered_role})")
+            murdered_role = (
+                roles.get(murdered_player).value
+                if roles and murdered_player in roles
+                else "unknown"
+            )
+            state.elimination_memory.append(
+                f"R{round_idx}: murdered {name(murdered_player)} ({murdered_role})"
+            )
             round_parts.append(f"murdered {name(murdered_player)}")
 
-        state.elimination_memory = state.elimination_memory[-6:]
+        state.elimination_memory = state.elimination_memory[-12:]
 
         round_label = f"R{round_idx}" if round_idx is not None else "Recent round"
         if round_parts:
             state.round_summaries.append(f"{round_label}: " + "; ".join(round_parts[:6]))
         elif public_summary:
-            state.round_summaries.append(f"{round_label}: {self._clip_text(public_summary, limit=180)}")
-        state.round_summaries = state.round_summaries[-5:]
+            state.round_summaries.append(
+                f"{round_label}: {self._clip_text(public_summary, limit=260)}"
+            )
+        state.round_summaries = state.round_summaries[-10:]
 
         relevant_alive = alive_ids or sorted({pid for pid in state.player_notes if pid != self.id})
         state.memory_summary = self._compose_memory_summary(state, relevant_alive, player_names)
@@ -330,6 +413,7 @@ class TraitorsAgent:
         private_state: AgentPrivateState,
         traitor_ids: List[int],
         traitor_summary: str = "",
+        traitor_chat_turn: int = 1,
         allowed_targets: List[int] | None = None,
         rng,
     ) -> Dict[str, object]:
@@ -341,12 +425,15 @@ class TraitorsAgent:
             "alive_ids": alive_ids,
             "alive_names": self._alive_names(alive_ids, player_names, rng),
             "player_names": player_names,
+            "self_name": player_names.get(self.id, f"P{self.id}"),
             "name_to_id": name_to_id,
             "public_summary": public_summary,
             "memory_summary": memory_summary,
+            "current_strategy_plan": private_state.current_strategy_plan,
             "top_suspicions": self._top_suspicions(private_state, player_names),
             "traitor_ids": traitor_ids,
             "traitor_summary": traitor_summary,
+            "traitor_chat_turn": traitor_chat_turn,
             "allowed_targets": allowed_targets or [],
             "rng": rng,
         }

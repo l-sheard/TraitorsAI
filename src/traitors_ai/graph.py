@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import math
 import random
@@ -12,22 +12,34 @@ from .logging_utils import JsonlLogger
 from .schemas import GameState, PublicMessage, validate_vote_action
 
 
-def _public_summary(messages: List[PublicMessage], player_names: Optional[Dict[int, str]] = None, max_chars: int = 600) -> str:
+def _public_summary(
+    messages: List[PublicMessage],
+    player_names: Optional[Dict[int, str]] = None,
+    max_chars: int = 1600,
+) -> str:
     if not messages:
         return "No public messages yet."
-    tail = messages[-6:]
+    tail = messages[-12:]
+
     def label(pid: int) -> str:
         return player_names.get(pid, f"P{pid}") if player_names else f"P{pid}"
+
     joined = " ".join([f"{label(m.speaker_id)}: {m.content}" for m in tail])
     return joined[-max_chars:]
 
 
-def _traitor_summary(messages: List[PublicMessage], player_names: Optional[Dict[int, str]] = None, max_chars: int = 400) -> str:
+def _traitor_summary(
+    messages: List[PublicMessage],
+    player_names: Optional[Dict[int, str]] = None,
+    max_chars: int = 1000,
+) -> str:
     if not messages:
         return "No private traitor messages yet."
-    tail = messages[-6:]
+    tail = messages[-10:]
+
     def label(pid: int) -> str:
         return player_names.get(pid, f"P{pid}") if player_names else f"P{pid}"
+
     joined = " ".join([f"{label(m.speaker_id)}: {m.content}" for m in tail])
     return joined[-max_chars:]
 
@@ -39,10 +51,46 @@ def _top_k_suspicion(scores: Dict[int, float], self_id: int, k: int) -> List[int
 
 
 _ALIAS_POOL = [
-    "Alice", "Bob", "Charlie", "Diana", "Ethan", "Fiona", "George", "Hannah", "Isaac", "Julia",
-    "Kevin", "Lila", "Mason", "Nora", "Owen", "Priya", "Quinn", "Ruby", "Sam", "Tara",
-    "Uma", "Victor", "Willa", "Xander", "Yasmin", "Zane", "Ava", "Ben", "Clara", "Daniel",
-    "Elena", "Felix", "Grace", "Henry", "Ivy", "Jonah", "Kira", "Leo", "Mia", "Noah",
+    "Alice",
+    "Bob",
+    "Charlie",
+    "Diana",
+    "Ethan",
+    "Fiona",
+    "George",
+    "Hannah",
+    "Isaac",
+    "Julia",
+    "Kevin",
+    "Lila",
+    "Mason",
+    "Nora",
+    "Owen",
+    "Priya",
+    "Quinn",
+    "Ruby",
+    "Sam",
+    "Tara",
+    "Uma",
+    "Victor",
+    "Willa",
+    "Xander",
+    "Yasmin",
+    "Zane",
+    "Ava",
+    "Ben",
+    "Clara",
+    "Daniel",
+    "Elena",
+    "Felix",
+    "Grace",
+    "Henry",
+    "Ivy",
+    "Jonah",
+    "Kira",
+    "Leo",
+    "Mia",
+    "Noah",
 ]
 
 
@@ -69,12 +117,14 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
         aliases = _llm_alias_map(state)
         alive_traitors = sorted(state.traitors & state.alive)
         alive_faithful = sorted(state.alive - state.traitors)
-        state.round_tracking.append({
-            "round": state.round_idx,
-            "alive_count": len(alive_ids),
-            "traitors_alive": len(alive_traitors),
-            "faithful_alive": len(alive_faithful),
-        })
+        state.round_tracking.append(
+            {
+                "round": state.round_idx,
+                "alive_count": len(alive_ids),
+                "traitors_alive": len(alive_traitors),
+                "faithful_alive": len(alive_faithful),
+            }
+        )
         logger.log_event(
             game_id=state.game_id,
             seed=state.config.seed,
@@ -211,6 +261,13 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
             if is_fallback:
                 state.vote_fallback_count += 1
                 state.parse_failure_count += 1
+            rationale = (vote_action.rationale or "").strip()
+            if len(rationale) > 160:
+                rationale = rationale[:157].rstrip() + "..."
+            private_state.current_strategy_plan = (
+                f"R{state.round_idx} vote plan: target {player_names.get(target, f'P{target}')}; "
+                f"reason: {rationale or 'none'}"
+            )
             votes[pid] = target
             logger.log_event(
                 game_id=state.game_id,
@@ -323,45 +380,50 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
         aliases = _llm_alias_map(state)
         player_names = {pid: aliases[pid] for pid in alive_ids}
         public_summary = _public_summary(state.public_transcript, player_names)
-        traitor_summary = _traitor_summary(state.traitor_private_transcript, player_names)
-        for pid in alive_traitors:
-            agent = agents[pid]
-            private_state = state.agent_states[pid]
-            view = agent.build_view(
-                round_idx=state.round_idx,
-                alive_ids=alive_ids,
-                player_names=player_names,
-                public_summary=public_summary,
-                private_state=private_state,
-                traitor_ids=alive_traitors,
-                traitor_summary=traitor_summary,
-                rng=state.rng,
-            )
-            content = agent.traitor_chat(view)
-            message = PublicMessage(
-                round=state.round_idx,
-                phase="traitor_chat",
-                speaker_id=pid,
-                content=content,
-            )
-            state.traitor_private_transcript.append(message)
-            logger.log_event(
-                game_id=state.game_id,
-                seed=state.config.seed,
-                condition=state.config.condition_name,
-                round_idx=state.round_idx,
-                phase="traitor_chat",
-                actor_id=pid,
-                action_type="traitor_chat",
-                payload={
-                    "content": content,
-                    "char_length": len(content),
-                    "round": message.round,
-                    "phase": message.phase,
-                    "speaker_id": pid,
-                },
-                actor_role="traitor",
-            )
+        chat_turns = state.config.traitor_chat_turns if len(alive_traitors) > 1 else 1
+        for chat_turn in range(chat_turns):
+            for pid in alive_traitors:
+                agent = agents[pid]
+                private_state = state.agent_states[pid]
+                traitor_summary = _traitor_summary(state.traitor_private_transcript, player_names)
+                view = agent.build_view(
+                    round_idx=state.round_idx,
+                    alive_ids=alive_ids,
+                    player_names=player_names,
+                    public_summary=public_summary,
+                    private_state=private_state,
+                    traitor_ids=alive_traitors,
+                    traitor_summary=traitor_summary,
+                    traitor_chat_turn=chat_turn + 1,
+                    rng=state.rng,
+                )
+                content = agent.traitor_chat(view)
+                private_state.current_strategy_plan = content
+                message = PublicMessage(
+                    round=state.round_idx,
+                    phase="traitor_chat",
+                    speaker_id=pid,
+                    content=content,
+                )
+                state.traitor_private_transcript.append(message)
+                logger.log_event(
+                    game_id=state.game_id,
+                    seed=state.config.seed,
+                    condition=state.config.condition_name,
+                    round_idx=state.round_idx,
+                    phase="traitor_chat",
+                    actor_id=pid,
+                    action_type="traitor_chat",
+                    payload={
+                        "content": content,
+                        "char_length": len(content),
+                        "round": message.round,
+                        "phase": message.phase,
+                        "speaker_id": pid,
+                        "chat_turn": chat_turn + 1,
+                    },
+                    actor_role="traitor",
+                )
         state.phase = "traitor_chat"
         return state
 
@@ -401,6 +463,13 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
             if is_fallback:
                 state.murder_fallback_count += 1
                 state.parse_failure_count += 1
+            rationale = (action.rationale or "").strip()
+            if len(rationale) > 160:
+                rationale = rationale[:157].rstrip() + "..."
+            private_state.current_strategy_plan = (
+                f"R{state.round_idx} murder plan: target {player_names.get(target, f'P{target}')}; "
+                f"reason: {rationale or 'none'}"
+            )
             murder_votes[pid] = target
             logger.log_event(
                 game_id=state.game_id,
@@ -418,7 +487,9 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
                 },
                 actor_role="traitor",
             )
-        state.murder_vote_history.append({"round": state.round_idx, "murder_votes": {str(k): v for k, v in murder_votes.items()}})
+        state.murder_vote_history.append(
+            {"round": state.round_idx, "murder_votes": {str(k): v for k, v in murder_votes.items()}}
+        )
         eliminated = apply_murder(state.alive, state.traitors, murder_votes, state.rng)
         if eliminated is not None:
             state.alive.remove(eliminated)
@@ -486,7 +557,9 @@ def build_graph(agents: Dict[int, TraitorsAgent], logger: JsonlLogger):  # noqa:
         player_names = {pid: aliases[pid] for pid in alive_ids}
         all_player_names = {pid: aliases[pid] for pid in sorted(state.roles.keys())}
         public_summary = _public_summary(state.public_transcript, player_names)
-        round_messages = [message for message in state.public_transcript if message.round == state.round_idx]
+        round_messages = [
+            message for message in state.public_transcript if message.round == state.round_idx
+        ]
         vote_record = state.vote_history[-1]["votes"] if state.vote_history else {}
         current_round = state.round_tracking[-1] if state.round_tracking else {}
         banished_player = current_round.get("banished_player")

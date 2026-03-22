@@ -1,7 +1,22 @@
 import React, { useEffect, useRef } from 'react';
 
-function TraitorChatPanel({ events, currentRound, maxHeight = '220px' }) {
+function TraitorChatPanel({ events, currentRound, summary, maxHeight = '220px' }) {
   const scrollerRef = useRef(null);
+  const personaMap = summary?.personas || {};
+  const aliasMap = summary?.player_aliases || {};
+
+  const labelFor = (playerId) => {
+    if (playerId == null) {
+      return 'P?';
+    }
+    const key = String(playerId);
+    const persona = personaMap[key] || personaMap[playerId] || {};
+    const personaName = typeof persona?.name === 'string' ? persona.name : `Player ${playerId}`;
+    const alias = aliasMap[key] || aliasMap[playerId] || null;
+    return alias
+      ? `P${playerId} · ${alias} · ${personaName}`
+      : `P${playerId} · ${personaName}`;
+  };
 
   const messages = (events || []).filter(
     (event) =>
@@ -31,14 +46,15 @@ function TraitorChatPanel({ events, currentRound, maxHeight = '220px' }) {
         <div ref={scrollerRef} className="space-y-2" style={{ maxHeight, overflowY: 'auto' }}>
           {messages.map((event, index) => {
             const isMurderVote = event.action_type === 'murder';
+            const targetId = event.payload?.target_id;
             const content = isMurderVote
-              ? `Murder vote for P${event.payload?.target_id ?? '?'}${event.payload?.rationale ? ` - ${event.payload.rationale}` : ''}`
+              ? `Murder vote for ${labelFor(targetId)}${event.payload?.rationale ? ` - ${event.payload.rationale}` : ''}`
               : event.payload?.content || '';
 
             return (
               <div key={`${event.round}-${event.actor_id}-${index}`} className="rounded-lg bg-slate-900/50 p-3">
                 <div className="mb-1 text-xs text-rose-300">
-                  Round {event.round} · P{event.actor_id}{isMurderVote ? ' - Murder Vote' : ''}
+                  Round {event.round} · {labelFor(event.actor_id)}{isMurderVote ? ' - Murder Vote' : ''}
                 </div>
                 <div className="text-sm text-rose-100">{content}</div>
               </div>

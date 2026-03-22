@@ -65,6 +65,9 @@ function GameList({ games, loading, error, onRefresh, onSelectGame }) {
                 <p className="mt-1 text-sm text-slate-400">
                   Condition: <span className="text-slate-200">{game.condition}</span> · Seed: <span className="text-slate-200">{game.seed}</span>
                 </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Run: <span className="text-slate-300">{game.run_id || 'legacy'}</span>
+                </p>
                 <p className="mt-2 text-sm text-slate-500">
                   {game.config?.n_players || '?'} players · {game.config?.n_traitors || '?'} traitors · {game.rounds} rounds
                 </p>

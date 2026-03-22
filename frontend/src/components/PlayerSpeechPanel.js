@@ -1,7 +1,22 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 
-function PlayerSpeechPanel({ events, currentRound, maxHeight = '280px' }) {
+function PlayerSpeechPanel({ events, currentRound, summary, maxHeight = '280px' }) {
   const scrollerRef = useRef(null);
+  const personaMap = summary?.personas || {};
+  const aliasMap = summary?.player_aliases || {};
+
+  const labelFor = (playerId) => {
+    if (playerId == null) {
+      return 'P?';
+    }
+    const key = String(playerId);
+    const persona = personaMap[key] || personaMap[playerId] || {};
+    const personaName = typeof persona?.name === 'string' ? persona.name : `Player ${playerId}`;
+    const alias = aliasMap[key] || aliasMap[playerId] || null;
+    return alias
+      ? `P${playerId} · ${alias} · ${personaName}`
+      : `P${playerId} · ${personaName}`;
+  };
 
   const roundMessages = useMemo(
     () =>
@@ -40,14 +55,15 @@ function PlayerSpeechPanel({ events, currentRound, maxHeight = '280px' }) {
         ) : (
           roundMessages.map((event, index) => {
             const isVote = event.action_type === 'vote';
+            const targetId = event.payload?.target_id;
             const body = isVote
-              ? `Votes for P${event.payload?.target_id ?? '?'}${event.payload?.rationale ? ` - ${event.payload.rationale}` : ''}`
+              ? `Votes for ${labelFor(targetId)}${event.payload?.rationale ? ` - ${event.payload.rationale}` : ''}`
               : event.payload?.content || '';
 
             return (
               <div key={`${event.round}-${event.actor_id}-${index}`} className="rounded-lg border border-slate-800 bg-slate-800/70 p-3">
                 <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  P{event.actor_id}{isVote ? ' - Vote' : ''}
+                  {labelFor(event.actor_id)}{isVote ? ' - Vote' : ''}
                 </div>
                 <div className="text-sm text-slate-100">{body}</div>
               </div>

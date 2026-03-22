@@ -7,7 +7,9 @@ from typing import Dict, List, Optional, Set, Tuple
 from .schemas import Role
 
 
-def assign_roles(n_players: int, n_traitors: int, rng: random.Random) -> Tuple[Dict[int, Role], Set[int]]:
+def assign_roles(
+    n_players: int, n_traitors: int, rng: random.Random
+) -> Tuple[Dict[int, Role], Set[int]]:
     player_ids = list(range(1, n_players + 1))
     traitors = set(rng.sample(player_ids, n_traitors))
     roles = {pid: (Role.traitor if pid in traitors else Role.faithful) for pid in player_ids}
@@ -68,4 +70,4 @@ def check_terminal(alive: Set[int], traitors: Set[int]) -> Optional[str]:
 
 def generate_game_id(seed: int, condition: str) -> str:
     digest = hashlib.sha256(f"{seed}-{condition}".encode("utf-8")).hexdigest()[:8]
-    return f"{condition}-{seed}-{digest}"
+    return f"{condition}-seed{seed}-id{digest}"

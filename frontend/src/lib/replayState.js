@@ -1,12 +1,21 @@
 function createInitialPlayers(summary) {
   const totalPlayers = summary?.config?.n_players || 0;
   const roleMap = summary?.roles || {};
+  const personaMap = summary?.personas || {};
+  const aliasMap = summary?.player_aliases || {};
   const players = {};
 
   for (let id = 1; id <= totalPlayers; id += 1) {
+    const persona = personaMap[id] || personaMap[String(id)] || {};
+    const personaName = typeof persona?.name === 'string' ? persona.name : `Player ${id}`;
+    const alias = aliasMap[id] || aliasMap[String(id)] || null;
+    const displayName = alias ? `${alias} · ${personaName}` : personaName;
     players[id] = {
       id,
       role: roleMap[id] || roleMap[String(id)] || null,
+      alias,
+      personaName,
+      displayName,
       alive: true,
       speaking: false,
       message: '',
