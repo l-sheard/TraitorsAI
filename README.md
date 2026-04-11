@@ -3,6 +3,9 @@
 Traitors AI is an LLM-driven social deduction simulator inspired by **The Traitors**.
 It includes a deterministic game engine, a CLI for running simulations, JSONL logging, and a replay viewer.
 
+## 2nd Place in the MSc category at the national BCS Lovelace Colloquium 2026
+I won 2nd place in the MSc category at the national BCS Lovelace Colloquium 2026 for my academic poster based on this project.
+
 ## Interface Preview
 
 ![Traitors AI Replay Console](docs/images/UIscreenshot.png)
